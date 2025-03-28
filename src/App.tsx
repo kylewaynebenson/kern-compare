@@ -1,11 +1,13 @@
 import { useState, useEffect, ChangeEvent } from 'react';
 import { 
   Check, AlertTriangle, UploadCloud, 
-  Type as ZoomIn, ZoomOut, Search, Info 
+  Type as Search, Info,
+  PlusCircleIcon,
+  MinusCircleIcon
 } from 'lucide-react';
 import type { FontData, KerningComparison } from './types';
 import { loadFontAndExtractKerning, analyzePotentialSpacingCandidates, analyzeKerningScope } from './utils/fontUtils';
-import { DICTIONARY_OPTIONS, getRecommendedPairs, getDictionary, filterPairsByDictionary } from './utils/dictionaries';
+import { DICTIONARY_OPTIONS, getDictionary, filterPairsByDictionary } from './utils/dictionaries';
 
 interface FontUploaderProps {
   defaultName: string;
@@ -165,47 +167,6 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
   );
 };
 
-interface KerningPreviewProps {
-  fontFirst: FontData;
-  fontSecond: FontData;
-  selectedPairs?: string[];
-  dictionaryId?: string;
-}
-
-// Simplify the KerningPreview component
-const KerningPreview = ({ fontFirst, fontSecond, selectedPairs = [], dictionaryId = 'latin-normal' }: KerningPreviewProps) => {
-  const [pairs, setPairs] = useState(() => getRecommendedPairs(dictionaryId));
-  
-  // Update pairs when dictionary changes
-  useEffect(() => {
-    if (selectedPairs.length === 0) {
-      setPairs(getRecommendedPairs(dictionaryId));
-    }
-  }, [dictionaryId, selectedPairs]);
-  
-  // If we have selected pairs from the comparison, prioritize those
-  const displayPairs = selectedPairs.length > 0 
-    ? selectedPairs 
-    : pairs;
-  
-  return (
-    <div className="space-y-6">
-      {/* Kerning pairs preview */}
-      <div>
-        <h3 className="text-md font-medium mb-3">
-          {selectedPairs.length > 0 
-            ? 'Selected Kerning Pairs' 
-            : `Standard Kerning Pairs (${DICTIONARY_OPTIONS[dictionaryId]})`}
-        </h3>
-        
-        {/* Rest of the component remains the same */}
-      </div>
-      
-      {/* Detail view with kerning values - remains the same */}
-    </div>
-  );
-};
-
 // Main application component
 const KerningComparison = () => {
   const [fontFirst, setFontFirst] = useState<FontData | null>(null);
@@ -217,10 +178,9 @@ const KerningComparison = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
-  const [showOnlyDifferences, setShowOnlyDifferences] = useState(false);
+  const [showOnlyDifferences] = useState(false);
   const [fontFirstUrl, setFontFirstUrl] = useState<string | null>(null);
   const [fontSecondUrl, setFontSecondUrl] = useState<string | null>(null);
-  const [selectedPairs, setSelectedPairs] = useState<string[]>([]);
   const [showDictionaryInfo, setShowDictionaryInfo] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [previewSize, setPreviewSize] = useState(24); // For the comparison view
@@ -303,10 +263,10 @@ const KerningComparison = () => {
         left: string;
         right: string;
         pair: string;
-        firstValue: number | null;
+        beforeValue: number | null;
         afterValue: number | null;
         difference: number;
-        status: 'match' | 'different' | 'only-first' | 'only-second';
+        status: 'match' | 'different' | 'only-before' | 'only-after';
       }> = [];
       let matchCount = 0;
       let differenceCount = 0;
@@ -318,7 +278,7 @@ const KerningComparison = () => {
         const firstValue = filteredFirstPairs[pairKey];
         const afterValue = filteredSecondPairs[pairKey];
         
-        let status: 'match' | 'different' | 'only-first' | 'only-second';
+        let status: 'match' | 'different' | 'only-before' | 'only-after';
         let difference = 0;
         
         if (firstValue !== undefined && afterValue !== undefined) {
@@ -332,18 +292,18 @@ const KerningComparison = () => {
             differenceCount++;
           }
         } else if (firstValue !== undefined) {
-          status = 'only-first';
+          status = 'only-before';
           onlyInFirstCount++;
         } else {
-          status = 'only-second';
+          status = 'only-after';
           onlyInSecondCount++;
         }
         
         comparisons.push({
           left,
           right,
-          pair: `${left}${right}`, // Concatenated for display
-          firstValue: firstValue !== undefined ? firstValue : null,
+          pair: `${left}${right}`, 
+          beforeValue: firstValue !== undefined ? firstValue : null,
           afterValue: afterValue !== undefined ? afterValue : null,
           difference,
           status
@@ -361,8 +321,8 @@ const KerningComparison = () => {
         // First by status priority
         const statusPriority: Record<string, number> = {
           'different': 0,
-          'only-first': 1,
-          'only-second': 2,
+          'only-before': 1,
+          'only-after': 2,
           'match': 3
         };
         
@@ -389,8 +349,8 @@ const KerningComparison = () => {
       
       // Analyze kerning scope
       const kerningScope = {
-        first: analyzeKerningScope(filteredFirstPairs),
-        second: analyzeKerningScope(filteredSecondPairs)
+        before: analyzeKerningScope(filteredFirstPairs),
+        after: analyzeKerningScope(filteredSecondPairs)
       };
       
       setComparisonResults({
@@ -399,17 +359,15 @@ const KerningComparison = () => {
           totalPairs: allPairKeys.size,
           matchCount,
           differenceCount,
-          onlyInFirstCount,
-          onlyInSecondCount,
-          firstTotal: Object.keys(filteredFirstPairs).length,
-          secondTotal: Object.keys(filteredSecondPairs).length
+          onlyInBeforeCount: onlyInFirstCount,
+          onlyInAfterCount: onlyInSecondCount,
+          beforeTotal: Object.keys(filteredFirstPairs).length,
+          afterTotal: Object.keys(filteredSecondPairs).length
         },
         spacingCandidates,
         kerningScope
       });
       
-      // Reset selected pairs when running a new comparison
-      setSelectedPairs([]);
     } catch (err: unknown) {
       console.error('Error analyzing fonts:', err);
       setError(`Error analyzing fonts: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -443,15 +401,6 @@ const KerningComparison = () => {
     
     return filtered;
   };
-  
-  // Select a pair for detailed comparison
-  const handlePairSelect = (pair: string) => {
-    if (selectedPairs.includes(pair)) {
-      setSelectedPairs(selectedPairs.filter(p => p !== pair));
-    } else {
-      setSelectedPairs([...selectedPairs, pair]);
-    }
-  };
 
   // Add this useEffect to reclassify comparisons when discrepancyUnits changes
   useEffect(() => {
@@ -461,14 +410,14 @@ const KerningComparison = () => {
     const rawComparisons = [...comparisonResults.comparisons];
     let matchCount = 0;
     let differenceCount = 0;
-    const onlyInFirstCount = comparisonResults.stats.onlyInFirstCount;
-    const onlyInSecondCount = comparisonResults.stats.onlyInSecondCount;
+    // const onlyInBeforeCount = comparisonResults.stats.onlyInBeforeCount;
+    // const onlyInAfterCount = comparisonResults.stats.onlyInAfterCount;
     
     // Reclassify each comparison based on new discrepancyUnits value
     const updatedComparisons = rawComparisons.map(comp => {
       // Only need to reclassify pairs that have values in both fonts
-      if (comp.firstValue !== null && comp.afterValue !== null) {
-        const difference = comp.afterValue - comp.firstValue;
+      if (comp.beforeValue !== null && comp.afterValue !== null) {
+        const difference = comp.afterValue - comp.beforeValue;
         
         // Check if status needs to change based on new discrepancyUnits
         if (Math.abs(difference) <= discrepancyUnits) {
@@ -482,11 +431,11 @@ const KerningComparison = () => {
           }
           differenceCount++;
         }
-      } else if (comp.firstValue !== null) {
+      } else if (comp.beforeValue !== null) {
         // These counts remain unchanged
-        comp.status = 'only-first';
+        comp.status = 'only-before';
       } else {
-        comp.status = 'only-second';
+        comp.status = 'only-after';
       }
       
       return comp;
@@ -658,7 +607,7 @@ const KerningComparison = () => {
               <div className="bg-gray-50 rounded-md p-4 text-center">
                 <p className="text-sm text-gray-500">Only In One Font</p>
                 <p className="text-2xl font-bold text-blue-600">
-                  {comparisonResults.stats.onlyInFirstCount + comparisonResults.stats.onlyInSecondCount}
+                  {comparisonResults.stats.onlyInBeforeCount + comparisonResults.stats.onlyInAfterCount}
                 </p>
               </div>
             </div>
@@ -668,26 +617,26 @@ const KerningComparison = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-md p-4">
                   <p className="text-sm text-gray-500">{fontFirst?.name || 'First'} Pairs</p>
-                  <p className="text-lg font-medium">{comparisonResults.stats.firstTotal}</p>
+                  <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
                   <div className="mt-2 text-xs text-gray-500">
-                    {comparisonResults.kerningScope?.first.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
-                    {comparisonResults.kerningScope?.first.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
-                    {comparisonResults.kerningScope?.first.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
-                    {comparisonResults.kerningScope?.first.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
-                    {comparisonResults.kerningScope?.first.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
-                    {comparisonResults.kerningScope?.first.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                    {comparisonResults.kerningScope?.before.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                    {comparisonResults.kerningScope?.before.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                    {comparisonResults.kerningScope?.before.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                    {comparisonResults.kerningScope?.before.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                    {comparisonResults.kerningScope?.before.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                    {comparisonResults.kerningScope?.before.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
                   </div>
                 </div>
                 <div className="bg-gray-50 rounded-md p-4">
                   <p className="text-sm text-gray-500">{fontSecond?.name || 'Second'} Pairs</p>
-                  <p className="text-lg font-medium">{comparisonResults.stats.secondTotal}</p>
+                  <p className="text-lg font-medium">{comparisonResults.stats.afterTotal}</p>
                   <div className="mt-2 text-xs text-gray-500">
-                    {comparisonResults.kerningScope?.second.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
-                    {comparisonResults.kerningScope?.second.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
-                    {comparisonResults.kerningScope?.second.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
-                    {comparisonResults.kerningScope?.second.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
-                    {comparisonResults.kerningScope?.second.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
-                    {comparisonResults.kerningScope?.second.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                    {comparisonResults.kerningScope?.after.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                    {comparisonResults.kerningScope?.after.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                    {comparisonResults.kerningScope?.after.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                    {comparisonResults.kerningScope?.after.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                    {comparisonResults.kerningScope?.after.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                    {comparisonResults.kerningScope?.after.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
                   </div>
                 </div>
               </div>
@@ -738,7 +687,7 @@ const KerningComparison = () => {
             </p>
             
             {/* Add font size controls */}
-            <div className="flex flex-wrap justify-between items-center mb-5 gap-4">
+            <div className="flex justify-between items-center mb-5 gap-4">
                           {/* Add pair search filter */}
               <div className="relative flex-grow">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -752,8 +701,8 @@ const KerningComparison = () => {
               </div>
               
               {/* Add discrepancy filter slider */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium whitespace-nowrap">Rounding:</label>
+              <div className="flex items-center gap-2 max-w-1/3">
+                <label className="text-sm font-medium whitespace-nowrap">Round:</label>
                 <input 
                   type="range" 
                   min="0" 
@@ -769,24 +718,6 @@ const KerningComparison = () => {
                     Kerning pairs with a difference within this range will be considered a match
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium whitespace-nowrap">Preview Size:</label>
-                <button 
-                  onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
-                  className="p-1 rounded-md border hover:bg-gray-50"
-                  aria-label="Decrease size"
-                >
-                  <ZoomOut className="h-4 w-4" />
-                </button>
-                <span className="text-sm text-gray-600">{previewSize}px</span>
-                <button 
-                  onClick={() => setPreviewSize(Math.min(72, previewSize + 4))}
-                  className="p-1 rounded-md border hover:bg-gray-50"
-                  aria-label="Increase size"
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </button>
               </div>
             </div>
             
@@ -818,25 +749,25 @@ const KerningComparison = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveFilter('only-first')}
+                    onClick={() => setActiveFilter('only-before')}
                     className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
-                      activeFilter === 'only-first' 
+                      activeFilter === 'only-before' 
                       ? 'bg-blue-50 text-blue-700 border-blue-300' 
                       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    Only in {fontFirst?.name || 'First Font'} ({comparisonResults.stats.onlyInFirstCount})
+                    Only in {fontFirst?.name || 'First Font'} ({comparisonResults.stats.onlyInBeforeCount})
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveFilter('only-second')}
+                    onClick={() => setActiveFilter('only-after')}
                     className={`px-4 py-2 text-sm font-medium border-t border-b ${
-                      activeFilter === 'only-second' 
+                      activeFilter === 'only-after' 
                       ? 'bg-blue-50 text-blue-700 border-blue-300' 
                       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    Only in {fontSecond?.name || 'Second Font'} ({comparisonResults.stats.onlyInSecondCount})
+                    Only in {fontSecond?.name || 'Second Font'} ({comparisonResults.stats.onlyInAfterCount})
                   </button>
                   <button
                     type="button"
@@ -857,12 +788,29 @@ const KerningComparison = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pair</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pair
+                      <span className="flex items-center gap-1">
+                      <button 
+                        onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
+                        className="p-1 rounded-md hover:bg-gray-60"
+                        aria-label="Decrease size"
+                      >
+                        <MinusCircleIcon className="h-3 w-3" />
+                      </button>
+                      <span className="text-xs">{previewSize}px</span>
+                      <button 
+                        onClick={() => setPreviewSize(Math.min(72, previewSize + 4))}
+                        className="p-1 rounded-md hover:bg-gray-70"
+                        aria-label="Increase size"
+                      >
+                        <PlusCircleIcon className="h-3 w-3" />
+                      </button>
+                    </span>
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontFirst?.name || 'First'}</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontSecond?.name || 'Second'}</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Difference</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -899,7 +847,7 @@ const KerningComparison = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {comp.firstValue !== null ? comp.firstValue : '—'}
+                        {comp.beforeValue !== null ? comp.beforeValue : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {comp.afterValue !== null ? comp.afterValue : '—'}
@@ -913,7 +861,7 @@ const KerningComparison = () => {
                           '—'
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4">
                         {comp.status === 'match' && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                             <Check className="h-3 w-3 mr-1" /> Match
@@ -924,28 +872,16 @@ const KerningComparison = () => {
                             <AlertTriangle className="h-3 w-3 mr-1" /> Different
                           </span>
                         )}
-                        {comp.status === 'only-first' && (
+                        {comp.status === 'only-before' && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                             Only in {fontFirst?.name || 'First Font'}
                           </span>
                         )}
-                        {comp.status === 'only-second' && (
+                        {comp.status === 'only-after' && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                             Only in {fontSecond?.name || 'Second Font'}
                           </span>
                         )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handlePairSelect(comp.pair)}
-                          className={`px-2 py-1 text-xs font-medium rounded ${
-                            selectedPairs.includes(comp.pair)
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          {selectedPairs.includes(comp.pair) ? 'Selected' : 'Select for Preview'}
-                        </button>
                       </td>
                     </tr>
                   ))}
