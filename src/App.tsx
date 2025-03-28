@@ -61,7 +61,7 @@ const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="space-y-2">
         <label className="text-sm font-medium">Font Name</label>
         <input 
@@ -126,7 +126,7 @@ const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryI
   
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
         <div className="flex-1">
           <label className="text-sm font-medium block mb-2">Sample Text</label>
           <input
@@ -206,7 +206,7 @@ const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryI
       
       {/* Kerning pairs preview */}
       <div>
-        <h3 className="text-lg font-medium mb-4">
+        <h3 className="text-md font-medium mb-3">
           {selectedPairs.length > 0 
             ? 'Selected Kerning Pairs' 
             : `Standard Kerning Pairs (${DICTIONARY_OPTIONS[dictionaryId]})`}
@@ -257,7 +257,7 @@ const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryI
       {/* Detail view with kerning values */}
       {selectedPairs.length > 0 && (
         <div>
-          <h3 className="text-lg font-medium mb-4">Kerning Values</h3>
+          <h3 className="text-md font-medium mb-3">Kerning Values</h3>
           <div className="border rounded-md overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -520,14 +520,14 @@ const KerningComparison = () => {
   };
 
   return (
-    <div className="mx-auto py-4 space-y-6 max-w-5xl">
+    <div className="mx-auto py-4 space-y-2 max-w-7xl mx-4">
       <div>
         <h1 className="text-2xl font-bold">Kern Compare</h1>
       </div>
       
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-bold mb-4">Font Settings</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
+        <h2 className="text-lg font-bold mb-3">Settings</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
           <FontUploader 
             defaultName="Before" 
             setFont={setFontBefore} 
@@ -540,8 +540,8 @@ const KerningComparison = () => {
           />
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
-          <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+          <div className="space-y-2">
             <label className="text-sm font-medium">Units of Discrepancy: {discrepancyUnits}</label>
             <input 
               type="range" 
@@ -556,7 +556,7 @@ const KerningComparison = () => {
             </p>
           </div>
           
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Dictionary</label>
               <button 
@@ -646,7 +646,7 @@ const KerningComparison = () => {
       {/* Font Preview Section */}
       {fontBefore && fontAfter && (
         <div className="bg-white rounded-lg shadow-sm border p-6">
-          <h2 className="text-lg font-bold mb-4">Font Preview</h2>
+          <h2 className="text-lg font-bold mb-3">Font Preview</h2>
           
           {/* Font preview styles */}
           <style dangerouslySetInnerHTML={{
@@ -679,13 +679,13 @@ const KerningComparison = () => {
       {comparisonResults && (
         <>
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h2 className="text-lg font-bold mb-4">Comparison Results</h2>
-            <p className="text-gray-500 mb-6">
+            <h2 className="text-lg font-bold mb-3">Analysis</h2>
+            <p className="text-gray-500 mb-5">
               Comparing {fontBefore.name} ({fontBefore.fileName}) with {fontAfter.name} ({fontAfter.fileName})
               using the {DICTIONARY_OPTIONS[dictionary]} dictionary
             </p>
             
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
               <div className="bg-gray-50 rounded-md p-4 text-center">
                 <p className="text-sm text-gray-500">Total Pairs</p>
                 <p className="text-2xl font-bold">{comparisonResults.stats.totalPairs}</p>
@@ -706,8 +706,8 @@ const KerningComparison = () => {
               </div>
             </div>
             
-            <div className="mb-6">
-              <h3 className="text-lg font-medium mb-3">Character Coverage</h3>
+            <div className="mb-5">
+              <h3 className="text-md font-medium mb-2">Character Coverage</h3>
               <p className="text-sm text-gray-500 mb-2">
                 Characters included in the {DICTIONARY_OPTIONS[dictionary]} dictionary:
               </p>
@@ -716,9 +716,9 @@ const KerningComparison = () => {
               </div>
             </div>
             
-            <div className="mb-6">
-              <h3 className="text-lg font-medium mb-3">Kerning Table Size</h3>
-              <div className="grid grid-cols-2 gap-4">
+            <div className="mb-5">
+              <h3 className="text-md font-medium mb-2">Kerning Table Size</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-md p-4">
                   <p className="text-sm text-gray-500">{fontBefore.name} Pairs</p>
                   <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
@@ -747,8 +747,8 @@ const KerningComparison = () => {
             </div>
             
             <div>
-              <h3 className="text-lg font-medium mb-3">Spacing Candidates</h3>
-              <p className="text-sm text-gray-500 mb-4">
+              <h3 className="text-md font-medium mb-2">Spacing Candidates</h3>
+              <p className="text-sm text-gray-500 mb-3">
                 Characters that appear in many kerning pairs may be candidates for spacing adjustments instead
               </p>
               
@@ -756,7 +756,7 @@ const KerningComparison = () => {
                 comparisonResults.spacingCandidates.right.length === 0 ? (
                 <p>No spacing candidates identified</p>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <h4 className="text-sm font-medium mb-2">Left Characters</h4>
                     <div className="space-y-1">
@@ -785,12 +785,12 @@ const KerningComparison = () => {
           </div>
           
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h2 className="text-lg font-bold mb-4">Side-by-Side Comparison</h2>
-            <p className="text-gray-500 mb-6">
+            <h2 className="text-lg font-bold mb-3">Side-by-Side Comparison</h2>
+            <p className="text-gray-500 mb-5">
               Visual comparison of kerning pairs between fonts
             </p>
             
-            <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+            <div className="flex flex-wrap justify-between items-center mb-5 gap-3">
               <div className="inline-flex rounded-md shadow-sm border" role="group">
                 <button
                   type="button"
