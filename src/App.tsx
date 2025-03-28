@@ -1,21 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react';
 import { 
   Check, AlertTriangle, UploadCloud, 
-  Type, ZoomIn, ZoomOut, Search, Info 
+  Type as ZoomIn, ZoomOut, Search, Info 
 } from 'lucide-react';
+import type { FontData, KerningComparison } from './types';
 import { loadFontAndExtractKerning, analyzePotentialSpacingCandidates, analyzeKerningScope } from './utils/fontUtils';
 import { DICTIONARY_OPTIONS, getRecommendedPairs, getDictionary, filterPairsByDictionary } from './utils/dictionaries';
 
+interface FontUploaderProps {
+  defaultName: string;
+  setFont: (font: FontData | null) => void;
+  setFontUrl: (url: string | null) => void;
+}
 
 // Font Uploader Component
-const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
+const FontUploader = ({ defaultName, setFont, setFontUrl }: FontUploaderProps) => {
   const [fontName, setFontName] = useState(defaultName);
   const [fileName, setFileName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState(null);
+  const [progress, setProgress] = useState<string | null>(null);
   
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     
     setIsLoading(true);
@@ -49,7 +55,7 @@ const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
       setProgress(null);
     } catch (error) {
       console.error('Error loading font:', error);
-      setProgress(`Error: ${error.message}`);
+      setProgress(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       
       // Clear after 3 seconds
       setTimeout(() => {
@@ -91,7 +97,10 @@ const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
             className={`px-4 py-2 text-sm border rounded-md ${
               isLoading ? 'bg-gray-100 text-gray-400' : 'bg-white hover:bg-gray-50 text-gray-700'
             }`}
-            onClick={() => document.getElementById(`font-file-${defaultName}`).click()}
+            onClick={() => {
+              const element = document.getElementById(`font-file-${defaultName}`);
+              if (element) element.click();
+            }}
             disabled={isLoading}
           >
             {isLoading ? 'Loading...' : 'Select Font'}
@@ -105,8 +114,15 @@ const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
   );
 };
 
+interface KerningPreviewProps {
+  fontBefore: FontData;
+  fontAfter: FontData;
+  selectedPairs?: string[];
+  dictionaryId?: string;
+}
+
 // Kerning Preview Component
-const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryId = 'latin-normal' }) => {
+const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryId = 'latin-normal' }: KerningPreviewProps) => {
   const [previewSize, setPreviewSize] = useState(60);
   const [previewText, setPreviewText] = useState('Average Typography');
   const [pairs, setPairs] = useState(() => getRecommendedPairs(dictionaryId));
@@ -303,21 +319,19 @@ const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryI
 
 // Main application component
 const KerningComparison = () => {
-  const [fontBefore, setFontBefore] = useState(null);
-  const [fontAfter, setFontAfter] = useState(null);
+  const [fontBefore, setFontBefore] = useState<FontData | null>(null);
+  const [fontAfter, setFontAfter] = useState<FontData | null>(null);
   const [discrepancyUnits, setDiscrepancyUnits] = useState(5);
   const [dictionary, setDictionary] = useState('latin-normal');
   const [customDictionary, setCustomDictionary] = useState('');
-  const [comparisonResults, setComparisonResults] = useState(null);
+  const [comparisonResults, setComparisonResults] = useState<KerningComparison | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [showOnlyDifferences, setShowOnlyDifferences] = useState(false);
-  const [previewText, setPreviewText] = useState('Average Typography');
-  const [previewSize, setPreviewSize] = useState(60);
-  const [fontBeforeUrl, setFontBeforeUrl] = useState(null);
-  const [fontAfterUrl, setFontAfterUrl] = useState(null);
-  const [selectedPairs, setSelectedPairs] = useState([]);
+  const [fontBeforeUrl, setFontBeforeUrl] = useState<string | null>(null);
+  const [fontAfterUrl, setFontAfterUrl] = useState<string | null>(null);
+  const [selectedPairs, setSelectedPairs] = useState<string[]>([]);
   const [showDictionaryInfo, setShowDictionaryInfo] = useState(false);
 
   // Update custom dictionary when it changes
@@ -375,7 +389,15 @@ const KerningComparison = () => {
       console.log('Total unique pair keys:', allPairKeys.size);
       
       // Compare pairs
-      const comparisons = [];
+      const comparisons: Array<{
+        left: string;
+        right: string;
+        pair: string;
+        beforeValue: number | null;
+        afterValue: number | null;
+        difference: number;
+        status: 'match' | 'different' | 'only-before' | 'only-after';
+      }> = [];
       let matchCount = 0;
       let differenceCount = 0;
       let onlyInBeforeCount = 0;
@@ -386,7 +408,7 @@ const KerningComparison = () => {
         const beforeValue = filteredBeforePairs[pairKey];
         const afterValue = filteredAfterPairs[pairKey];
         
-        let status;
+        let status: 'match' | 'different' | 'only-before' | 'only-after';
         let difference = 0;
         
         if (beforeValue !== undefined && afterValue !== undefined) {
@@ -427,15 +449,17 @@ const KerningComparison = () => {
       // Sort by status and difference magnitude
       comparisons.sort((a, b) => {
         // First by status priority
-        const statusPriority = {
+        const statusPriority: Record<string, number> = {
           'different': 0,
           'only-before': 1,
           'only-after': 2,
           'match': 3
         };
         
-        if (statusPriority[a.status] !== statusPriority[b.status]) {
-          return statusPriority[a.status] - statusPriority[b.status];
+        if (statusPriority[a.status as keyof typeof statusPriority] !== 
+            statusPriority[b.status as keyof typeof statusPriority]) {
+          return statusPriority[a.status as keyof typeof statusPriority] - 
+                 statusPriority[b.status as keyof typeof statusPriority];
         }
         
         // Then by difference magnitude for 'different' status
@@ -476,9 +500,9 @@ const KerningComparison = () => {
       
       // Reset selected pairs when running a new comparison
       setSelectedPairs([]);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error analyzing fonts:', err);
-      setError(`Error analyzing fonts: ${err.message}`);
+      setError(`Error analyzing fonts: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -511,7 +535,7 @@ const KerningComparison = () => {
   };
   
   // Select a pair for detailed comparison
-  const handlePairSelect = (pair) => {
+  const handlePairSelect = (pair: string) => {
     if (selectedPairs.includes(pair)) {
       setSelectedPairs(selectedPairs.filter(p => p !== pair));
     } else {
@@ -681,7 +705,7 @@ const KerningComparison = () => {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-lg font-bold mb-3">Analysis</h2>
             <p className="text-gray-500 mb-5">
-              Comparing {fontBefore.name} ({fontBefore.fileName}) with {fontAfter.name} ({fontAfter.fileName})
+              Comparing {fontBefore?.name || 'Before'} ({fontBefore?.fileName || 'N/A'}) with {fontAfter?.name || 'After'} ({fontAfter?.fileName || 'N/A'})
               using the {DICTIONARY_OPTIONS[dictionary]} dictionary
             </p>
             
@@ -720,7 +744,7 @@ const KerningComparison = () => {
               <h3 className="text-md font-medium mb-2">Kerning Table Size</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-md p-4">
-                  <p className="text-sm text-gray-500">{fontBefore.name} Pairs</p>
+                  <p className="text-sm text-gray-500">{fontBefore?.name || 'Before'} Pairs</p>
                   <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
                   <div className="mt-2 text-xs text-gray-500">
                     {comparisonResults.kerningScope?.before.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
@@ -732,7 +756,7 @@ const KerningComparison = () => {
                   </div>
                 </div>
                 <div className="bg-gray-50 rounded-md p-4">
-                  <p className="text-sm text-gray-500">{fontAfter.name} Pairs</p>
+                  <p className="text-sm text-gray-500">{fontAfter?.name || 'After'} Pairs</p>
                   <p className="text-lg font-medium">{comparisonResults.stats.afterTotal}</p>
                   <div className="mt-2 text-xs text-gray-500">
                     {comparisonResults.kerningScope?.after.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
@@ -823,7 +847,7 @@ const KerningComparison = () => {
                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                   }`}
                 >
-                  Only in {fontBefore.name}
+                  Only in {fontBefore?.name || 'Before'}
                 </button>
                 <button
                   type="button"
@@ -834,7 +858,7 @@ const KerningComparison = () => {
                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                   }`}
                 >
-                  Only in {fontAfter.name}
+                  Only in {fontAfter?.name || 'After'}
                 </button>
                 <button
                   type="button"
@@ -868,8 +892,8 @@ const KerningComparison = () => {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pair</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontBefore.name}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontAfter.name}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontBefore?.name || 'Before'}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontAfter?.name || 'After'}</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Difference</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -934,12 +958,12 @@ const KerningComparison = () => {
                         )}
                         {comp.status === 'only-before' && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            Only in {fontBefore.name}
+                            Only in {fontBefore?.name || 'Before'}
                           </span>
                         )}
                         {comp.status === 'only-after' && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                            Only in {fontAfter.name}
+                            Only in {fontAfter?.name || 'After'}
                           </span>
                         )}
                       </td>

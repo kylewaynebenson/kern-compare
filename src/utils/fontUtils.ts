@@ -1,16 +1,71 @@
 import opentype from 'opentype.js';
 
+// Define interfaces - UPDATED
+interface Font {
+  // Retain essential properties from opentype.Font
+  getKerningValue: (leftGlyph: any, rightGlyph: any) => number;
+  charToGlyph: (char: string) => any;
+  glyphs?: { length: number };
+  
+  // Add custom properties
+  nameToGlyph?: (name: string) => Glyph | undefined;
+  unitsPerEm: number;
+  tables?: Record<string, any>;  // Use generic record type for tables
+  names?: {
+    fullName?: {
+      en: string;
+    };
+  };
+  outlinesFormat?: string;
+}
+
+// Rest of the interfaces remain the same
+interface Glyph {
+  unicode?: number;
+}
+
+interface FontData {
+  font: Font;
+  url: string;
+  name: string;
+  fileName: string;
+  kerningPairs: Record<string, number>;
+  glyphCount: number;
+  unitsPerEm: number;
+  format: string;
+  note?: string;
+}
+
+interface CharacterFrequency {
+  char: string;
+  count: number;
+}
+
+interface SpacingCandidates {
+  left: CharacterFrequency[];
+  right: CharacterFrequency[];
+}
+
+interface KerningScope {
+  uppercase: boolean;
+  lowercase: boolean;
+  numbers: boolean;
+  punctuation: boolean;
+  accented: boolean;
+  nonLatin: boolean;
+}
+
 /**
  * Extract kerning pairs using OpenType.js built-in methods
  */
-const extractKerningPairs = (font) => {
+const extractKerningPairs = (font: Font): Record<string, number> => {
   // Check if the font has the required methods
   if (!font || typeof font.getKerningValue !== 'function' || typeof font.charToGlyph !== 'function') {
     console.error('Font missing required methods for kerning extraction');
     return {};
   }
 
-  const kerningPairs = {};
+  const kerningPairs: Record<string, number> = {};
   
   // Use a comprehensive character set
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?"\'()[]{}<>/-_';
@@ -34,7 +89,8 @@ const extractKerningPairs = (font) => {
           kerningPairs[`${leftChar},${rightChar}`] = kerningValue;
         }
       } catch (e) {
-        console.warn(`Error getting kerning for ${leftChar},${rightChar}: ${e.message}`);
+        const error = e as Error;
+        console.warn(`Error getting kerning for ${leftChar},${rightChar}: ${error.message}`);
       }
     }
   }
@@ -46,7 +102,7 @@ const extractKerningPairs = (font) => {
 /**
  * Canvas-based kerning detection as a fallback
  */
-const tryCanvasMetricsApproach = async (file) => {
+const tryCanvasMetricsApproach = async (file: File): Promise<Record<string, number>> => {
   // Create a blob URL for the font
   const fontUrl = URL.createObjectURL(file);
   const fontName = "tempFont" + Math.floor(Math.random() * 10000);
@@ -68,7 +124,8 @@ const tryCanvasMetricsApproach = async (file) => {
     await document.fonts.load(`16px ${fontName}`);
     console.log(`Font ${fontName} loaded for canvas measurements`);
   } catch (e) {
-    console.error('Error loading font for canvas:', e);
+    const error = e as Error;
+    console.error('Error loading font for canvas:', error);
     document.head.removeChild(style);
     URL.revokeObjectURL(fontUrl);
     return {};
@@ -80,6 +137,13 @@ const tryCanvasMetricsApproach = async (file) => {
   canvas.height = 100;
   const ctx = canvas.getContext('2d');
   
+  if (!ctx) {
+    console.error('Could not get canvas context');
+    document.head.removeChild(style);
+    URL.revokeObjectURL(fontUrl);
+    return {};
+  }
+  
   // Set the font
   ctx.font = `32px ${fontName}`;
   
@@ -90,7 +154,7 @@ const tryCanvasMetricsApproach = async (file) => {
   ];
   
   // Detect kerning by comparing widths
-  const kerningPairs = {};
+  const kerningPairs: Record<string, number> = {};
   
   for (const pair of testPairs) {
     if (pair.length !== 2) continue;
@@ -126,12 +190,12 @@ const tryCanvasMetricsApproach = async (file) => {
 /**
  * Generate synthetic kerning data for demonstration
  */
-const generateSyntheticKerning = (font) => {
-  const pairs = {};
+const generateSyntheticKerning = (font: Font): Record<string, number> => {
+  const pairs: Record<string, number> = {};
   const unitsPerEm = font?.unitsPerEm || 1000;
   
   // Common kerning pairs with typical values
-  const commonPairs = {
+  const commonPairs: Record<string, number> = {
     'A,V': -0.07, 'A,W': -0.06, 'A,Y': -0.08, 'F,a': -0.03, 
     'L,T': -0.08, 'P,a': -0.03, 'T,a': -0.06, 'T,o': -0.06, 
     'V,a': -0.05, 'W,a': -0.04, 'Y,o': -0.07,
@@ -150,7 +214,7 @@ const generateSyntheticKerning = (font) => {
 /**
  * Load font and extract kerning using built-in methods
  */
-const loadFontAndExtractKerning = async (file) => {
+const loadFontAndExtractKerning = async (file: File): Promise<FontData> => {
   if (!file) {
     throw new Error('No file provided');
   }
@@ -159,8 +223,27 @@ const loadFontAndExtractKerning = async (file) => {
     // Create a blob URL for the font
     const fontUrl = URL.createObjectURL(file);
     
-    // Load the font using opentype.js
-    const font = await opentype.load(fontUrl);
+    // Load the font using opentype.js - Fix the type conversion
+    const originalFont = await opentype.load(fontUrl);
+    
+    // Create a compatible Font object with the structure we need
+    const font: Font = {
+      ...originalFont as any, // Base properties
+      unitsPerEm: originalFont.unitsPerEm,
+      charToGlyph: originalFont.charToGlyph.bind(originalFont),
+      getKerningValue: originalFont.getKerningValue.bind(originalFont),
+      outlinesFormat: (originalFont as any).outlinesFormat,
+      // Map the nested names structure if needed
+      names: {
+        fullName: {
+          en: originalFont.names.fullName ? 
+            (originalFont.names.fullName as any).en || file.name : 
+            file.name
+        }
+      },
+      // Map tables to our simplified structure
+      tables: originalFont.tables as Record<string, any>
+    };
     
     // Check if the necessary methods exist
     if (typeof font.getKerningValue === 'function' && typeof font.charToGlyph === 'function') {
@@ -220,16 +303,17 @@ const loadFontAndExtractKerning = async (file) => {
       format: font.outlinesFormat || 'unknown'
     };
   } catch (error) {
-    console.error('Error loading font:', error);
-    throw new Error(`Failed to load font: ${error.message}`);
+    const err = error as Error;
+    console.error('Error loading font:', err);
+    throw new Error(`Failed to load font: ${err.message}`);
   }
 };
   
 /**
  * Convert glyph names or IDs to Unicode characters where possible
  */
-const getReadableKerningPairs = (font, kerningPairs) => {
-  const readablePairs = {};
+const getReadableKerningPairs = (font: Font, kerningPairs: Record<string, number>): Record<string, number> => {
+  const readablePairs: Record<string, number> = {};
   
   for (const [pairKey, value] of Object.entries(kerningPairs)) {
     const [left, right] = pairKey.split(',');
@@ -238,14 +322,14 @@ const getReadableKerningPairs = (font, kerningPairs) => {
     let leftChar = left;
     if (font.nameToGlyph && font.nameToGlyph(left)) {
       const glyph = font.nameToGlyph(left);
-      leftChar = glyph.unicode ? String.fromCharCode(glyph.unicode) : left;
+      leftChar = glyph?.unicode ? String.fromCharCode(glyph.unicode) : left;
     }
     
     // Convert right glyph to character
     let rightChar = right;
     if (font.nameToGlyph && font.nameToGlyph(right)) {
       const glyph = font.nameToGlyph(right);
-      rightChar = glyph.unicode ? String.fromCharCode(glyph.unicode) : right;
+      rightChar = glyph?.unicode ? String.fromCharCode(glyph.unicode) : right;
     }
     
     const readablePairKey = `${leftChar},${rightChar}`;
@@ -258,7 +342,7 @@ const getReadableKerningPairs = (font, kerningPairs) => {
 /**
  * Detects font format based on tables
  */
-const detectFontFormat = (font) => {
+const detectFontFormat = (font: Font): string => {
   if (!font || !font.tables) return 'Unknown';
   
   if (font.tables.CFF) {
@@ -274,8 +358,33 @@ const detectFontFormat = (font) => {
 
 // 4. INTEGRATION WITH THE FONT UPLOADER COMPONENT
 
-const handleFileChange = async (e) => {
-  const file = e.target.files[0];
+interface FontState {
+  data: Font;
+  name: string;
+  fileName: string;
+  url: string;
+  kerningPairs: Record<string, number>;
+  glyphCount: number;
+  unitsPerEm: number;
+  format: string;
+}
+
+interface UploadHandlerOptions {
+  setIsLoading: (loading: boolean) => void;
+  setFileName: (name: string) => void;
+  setFont: (font: FontState) => void;
+  setError: (error: string) => void;
+  fontName?: string;
+  defaultName: string;
+}
+
+const handleFileChange = async (
+  e: React.ChangeEvent<HTMLInputElement>, 
+  options: UploadHandlerOptions
+) => {
+  const { setIsLoading, setFileName, setFont, setError, fontName, defaultName } = options;
+  
+  const file = e.target.files?.[0];
   if (!file) return;
   
   setIsLoading(true);
@@ -295,8 +404,9 @@ const handleFileChange = async (e) => {
       format: fontData.format
     });
   } catch (error) {
-    console.error('Error loading font:', error);
-    setError(`Error loading font: ${error.message}`);
+    const err = error as Error;
+    console.error('Error loading font:', err);
+    setError(`Error loading font: ${err.message}`);
   } finally {
     setIsLoading(false);
   }
@@ -307,10 +417,10 @@ const handleFileChange = async (e) => {
 /**
  * Analyzes potential spacing candidates based on kerning frequency
  */
-const analyzePotentialSpacingCandidates = (kerningPairs) => {
+const analyzePotentialSpacingCandidates = (kerningPairs: Record<string, number>): SpacingCandidates => {
   // Characters that should probably use spacing instead of kerning
-  const leftCharFrequency = {};
-  const rightCharFrequency = {};
+  const leftCharFrequency: Record<string, number> = {};
+  const rightCharFrequency: Record<string, number> = {};
   
   // Count frequency of characters in kerning pairs
   Object.keys(kerningPairs).forEach(pairKey => {
@@ -343,9 +453,9 @@ const analyzePotentialSpacingCandidates = (kerningPairs) => {
 /**
  * Determines the scope of kerning (which character sets are covered)
  */
-const analyzeKerningScope = (kerningPairs) => {
+const analyzeKerningScope = (kerningPairs: Record<string, number>): KerningScope => {
   // Initialize character set flags
-  const charSets = {
+  const charSets: KerningScope = {
     uppercase: false,
     lowercase: false,
     numbers: false,
@@ -355,7 +465,7 @@ const analyzeKerningScope = (kerningPairs) => {
   };
   
   // Regex patterns for different character sets
-  const patterns = {
+  const patterns: Record<keyof KerningScope, RegExp> = {
     uppercase: /^[A-Z]$/,
     lowercase: /^[a-z]$/,
     numbers: /^[0-9]$/,
@@ -374,7 +484,8 @@ const analyzeKerningScope = (kerningPairs) => {
     [left, right].forEach(char => {
       for (const [setName, pattern] of Object.entries(patterns)) {
         if (pattern.test(char)) {
-          charSets[setName] = true;
+          // Using type assertion here because we know the keys match
+          charSets[setName as keyof KerningScope] = true;
         }
       }
     });
@@ -388,5 +499,14 @@ export {
   loadFontAndExtractKerning,
   tryCanvasMetricsApproach,
   analyzePotentialSpacingCandidates,
-  analyzeKerningScope
+  analyzeKerningScope,
+  handleFileChange,
+  getReadableKerningPairs,
+  detectFontFormat,
+  type Font,
+  type FontData,
+  type SpacingCandidates,
+  type KerningScope,
+  type FontState,
+  type UploadHandlerOptions
 };
