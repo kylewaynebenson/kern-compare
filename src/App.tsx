@@ -815,7 +815,7 @@ const KerningComparison = () => {
             </p>
             
             <div className="flex flex-wrap justify-between items-center mb-5 gap-3">
-              <div className="inline-flex rounded-md shadow-sm border" role="group">
+              <div className="inline-flex rounded-md shadow-sm" role="group">
                 <button
                   type="button"
                   onClick={() => setActiveFilter('all')}
