@@ -1,5 +1,305 @@
 import React, { useState, useEffect } from 'react';
-import { Check, AlertTriangle, UploadCloud, Type, ZoomIn, ZoomOut } from 'lucide-react';
+import { 
+  Check, AlertTriangle, UploadCloud, 
+  Type, ZoomIn, ZoomOut, Search, Info 
+} from 'lucide-react';
+import { loadFontAndExtractKerning, analyzePotentialSpacingCandidates, analyzeKerningScope } from './utils/fontUtils';
+import { DICTIONARY_OPTIONS, getRecommendedPairs, getDictionary, filterPairsByDictionary } from './utils/dictionaries';
+
+
+// Font Uploader Component
+const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
+  const [fontName, setFontName] = useState(defaultName);
+  const [fileName, setFileName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setIsLoading(true);
+    setFileName(file.name);
+    setProgress('Loading font...');
+    
+    try {
+      // Load font and extract kerning information
+      const fontData = await loadFontAndExtractKerning(file);
+      setProgress('Extracting kerning data...');
+      
+      // Calculate some statistics
+      const kerningCount = Object.keys(fontData.kerningPairs).length;
+      
+      // Set font data
+      setFont({
+        data: fontData.font,
+        name: fontName || defaultName,
+        fileName: file.name,
+        url: fontData.url,
+        kerningPairs: fontData.kerningPairs,
+        kerningCount,
+        glyphCount: fontData.glyphCount,
+        unitsPerEm: fontData.unitsPerEm,
+        format: fontData.format
+      });
+      
+      // Set font URL for CSS
+      setFontUrl(fontData.url);
+      
+      setProgress(null);
+    } catch (error) {
+      console.error('Error loading font:', error);
+      setProgress(`Error: ${error.message}`);
+      
+      // Clear after 3 seconds
+      setTimeout(() => {
+        setProgress(null);
+      }, 3000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Font Name</label>
+        <input 
+          type="text"
+          className="w-full px-3 py-2 border rounded-md"
+          value={fontName} 
+          onChange={(e) => setFontName(e.target.value)}
+          placeholder={defaultName}
+        />
+      </div>
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Upload Font File</label>
+        <div className="border border-dashed rounded-md p-6 flex flex-col items-center justify-center bg-gray-50">
+          <UploadCloud className="mb-2 h-8 w-8 text-gray-400" />
+          <p className="text-sm text-gray-500 mb-2">
+            {progress || "Drag and drop or click to upload"}
+          </p>
+          <input
+            type="file"
+            accept=".ttf,.otf,.woff,.woff2"
+            onChange={handleFileChange}
+            className="hidden"
+            id={`font-file-${defaultName}`}
+          />
+          <button 
+            className={`px-4 py-2 text-sm border rounded-md ${
+              isLoading ? 'bg-gray-100 text-gray-400' : 'bg-white hover:bg-gray-50 text-gray-700'
+            }`}
+            onClick={() => document.getElementById(`font-file-${defaultName}`).click()}
+            disabled={isLoading}
+          >
+            {isLoading ? 'Loading...' : 'Select Font'}
+          </button>
+          {fileName && (
+            <p className="mt-2 text-sm text-gray-500">{fileName}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Kerning Preview Component
+const KerningPreview = ({ fontBefore, fontAfter, selectedPairs = [], dictionaryId = 'latin-normal' }) => {
+  const [previewSize, setPreviewSize] = useState(60);
+  const [previewText, setPreviewText] = useState('Average Typography');
+  const [pairs, setPairs] = useState(() => getRecommendedPairs(dictionaryId));
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Update pairs when dictionary changes
+  useEffect(() => {
+    if (selectedPairs.length === 0) {
+      setPairs(getRecommendedPairs(dictionaryId));
+    }
+  }, [dictionaryId, selectedPairs]);
+  
+  // If we have selected pairs from the comparison, prioritize those
+  const displayPairs = selectedPairs.length > 0 
+    ? selectedPairs 
+    : pairs.filter(pair => pair.toLowerCase().includes(searchTerm.toLowerCase()));
+  
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+        <div className="flex-1">
+          <label className="text-sm font-medium block mb-2">Sample Text</label>
+          <input
+            type="text"
+            value={previewText}
+            onChange={(e) => setPreviewText(e.target.value)}
+            placeholder="Enter text to preview"
+            className="w-full px-3 py-2 border rounded-md"
+          />
+        </div>
+        
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
+            className="p-1 rounded-md border hover:bg-gray-50"
+            aria-label="Decrease size"
+          >
+            <ZoomOut className="h-5 w-5" />
+          </button>
+          <span className="text-sm text-gray-600">{previewSize}px</span>
+          <button 
+            onClick={() => setPreviewSize(Math.min(96, previewSize + 4))}
+            className="p-1 rounded-md border hover:bg-gray-50"
+            aria-label="Increase size"
+          >
+            <ZoomIn className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+      
+      {/* General text preview */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="border rounded-md p-4">
+          <h3 className="text-sm font-medium text-gray-500 mb-2">{fontBefore.name}</h3>
+          <div 
+            style={{ 
+              fontFamily: 'FontBefore', 
+              fontSize: `${previewSize}px`, 
+              lineHeight: 1.2,
+              textRendering: 'optimizeLegibility'
+            }}
+            className="min-h-16 p-3 border rounded-md bg-gray-50"
+          >
+            {previewText || 'Typography'}
+          </div>
+        </div>
+        
+        <div className="border rounded-md p-4">
+          <h3 className="text-sm font-medium text-gray-500 mb-2">{fontAfter.name}</h3>
+          <div 
+            style={{ 
+              fontFamily: 'FontAfter', 
+              fontSize: `${previewSize}px`, 
+              lineHeight: 1.2,
+              textRendering: 'optimizeLegibility'
+            }}
+            className="min-h-16 p-3 border rounded-md bg-gray-50"
+          >
+            {previewText || 'Typography'}
+          </div>
+        </div>
+      </div>
+      
+      {/* Kerning pair search */}
+      {selectedPairs.length === 0 && (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <input
+            type="text"
+            placeholder="Filter kerning pairs..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border rounded-md"
+          />
+        </div>
+      )}
+      
+      {/* Kerning pairs preview */}
+      <div>
+        <h3 className="text-lg font-medium mb-4">
+          {selectedPairs.length > 0 
+            ? 'Selected Kerning Pairs' 
+            : `Standard Kerning Pairs (${DICTIONARY_OPTIONS[dictionaryId]})`}
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <h4 className="text-sm font-medium text-gray-500 mb-2">{fontBefore.name}</h4>
+            <div className="space-y-2">
+              {displayPairs.map(pair => (
+                <div key={pair} className="flex justify-between items-center p-2 border rounded">
+                  <span className="font-medium text-sm">{pair}</span>
+                  <span 
+                    style={{ 
+                      fontFamily: 'FontBefore', 
+                      fontSize: `${previewSize/1.5}px`,
+                      textRendering: 'optimizeLegibility'
+                    }}
+                  >
+                    {pair}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <h4 className="text-sm font-medium text-gray-500 mb-2">{fontAfter.name}</h4>
+            <div className="space-y-2">
+              {displayPairs.map(pair => (
+                <div key={pair} className="flex justify-between items-center p-2 border rounded">
+                  <span className="font-medium text-sm">{pair}</span>
+                  <span 
+                    style={{ 
+                      fontFamily: 'FontAfter', 
+                      fontSize: `${previewSize/1.5}px`,
+                      textRendering: 'optimizeLegibility'
+                    }}
+                  >
+                    {pair}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Detail view with kerning values */}
+      {selectedPairs.length > 0 && (
+        <div>
+          <h3 className="text-lg font-medium mb-4">Kerning Values</h3>
+          <div className="border rounded-md overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left">Pair</th>
+                  <th className="px-4 py-2 text-right">{fontBefore.name}</th>
+                  <th className="px-4 py-2 text-right">{fontAfter.name}</th>
+                  <th className="px-4 py-2 text-right">Difference</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {selectedPairs.map(pair => {
+                  // Find the pair in each font's kerning data
+                  const [left, right] = pair.split('');
+                  const pairKey = `${left},${right}`;
+                  
+                  const beforeValue = fontBefore.kerningPairs?.[pairKey] ?? 0;
+                  const afterValue = fontAfter.kerningPairs?.[pairKey] ?? 0;
+                  const difference = afterValue - beforeValue;
+                  
+                  return (
+                    <tr key={pair} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 font-medium">{pair}</td>
+                      <td className="px-4 py-2 text-right">{beforeValue}</td>
+                      <td className="px-4 py-2 text-right">{afterValue}</td>
+                      <td className={`px-4 py-2 text-right ${
+                        difference > 0 ? 'text-green-600' : 
+                        difference < 0 ? 'text-red-600' : 'text-gray-500'
+                      }`}>
+                        {difference > 0 ? '+' : ''}{difference}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Main application component
 const KerningComparison = () => {
@@ -7,41 +307,27 @@ const KerningComparison = () => {
   const [fontAfter, setFontAfter] = useState(null);
   const [discrepancyUnits, setDiscrepancyUnits] = useState(5);
   const [dictionary, setDictionary] = useState('latin-normal');
+  const [customDictionary, setCustomDictionary] = useState('');
   const [comparisonResults, setComparisonResults] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [showOnlyDifferences, setShowOnlyDifferences] = useState(false);
-  const [previewText, setPreviewText] = useState('Typography');
-  const [previewSize, setPreviewSize] = useState(36);
+  const [previewText, setPreviewText] = useState('Average Typography');
+  const [previewSize, setPreviewSize] = useState(60);
   const [fontBeforeUrl, setFontBeforeUrl] = useState(null);
   const [fontAfterUrl, setFontAfterUrl] = useState(null);
+  const [selectedPairs, setSelectedPairs] = useState([]);
+  const [showDictionaryInfo, setShowDictionaryInfo] = useState(false);
 
-  // Dictionary options
-  const DICTIONARIES = {
-    'latin-normal': 'Latin Normal',
-    'latin-concise': 'Latin Concise',
-    'latin-expansive': 'Latin Expansive'
-  };
-
-  // Extract kerning pairs from the font
-  const extractKerningPairs = (font) => {
-    if (!font || !font.kerningPairs) {
-      return [];
+  // Update custom dictionary when it changes
+  useEffect(() => {
+    if (dictionary === 'custom') {
+      // Update the custom dictionary in the module
+      const dictionaries = getDictionary('custom');
+      dictionaries.characters = customDictionary;
     }
-    
-    const pairs = [];
-    for (const [leftRight, value] of Object.entries(font.kerningPairs)) {
-      const [left, right] = leftRight.split(',');
-      pairs.push({
-        left,
-        right,
-        value
-      });
-    }
-    
-    return pairs;
-  };
+  }, [dictionary, customDictionary]);
 
   // Compare the kerning tables
   const compareKerningTables = () => {
@@ -54,26 +340,39 @@ const KerningComparison = () => {
     setError(null);
     
     try {
-      const beforePairs = extractKerningPairs(fontBefore.data);
-      const afterPairs = extractKerningPairs(fontAfter.data);
+      // Get kerning pairs from both fonts
+      const beforePairs = fontBefore.kerningPairs || {};
+      const afterPairs = fontAfter.kerningPairs || {};
       
-      // Create maps for easier comparison
-      const beforeMap = new Map();
-      const afterMap = new Map();
+      console.log('Before kerning pairs:', Object.keys(beforePairs).length);
+      console.log('After kerning pairs:', Object.keys(afterPairs).length);
       
-      beforePairs.forEach(pair => {
-        beforeMap.set(`${pair.left},${pair.right}`, pair.value);
-      });
+      if (Object.keys(beforePairs).length === 0 && Object.keys(afterPairs).length === 0) {
+        setError('No kerning pairs found in either font. Try a different font file or check font format support.');
+        setIsAnalyzing(false);
+        return;
+      }
       
-      afterPairs.forEach(pair => {
-        afterMap.set(`${pair.left},${pair.right}`, pair.value);
-      });
+      // Filter pairs based on selected dictionary
+      const filteredBeforePairs = filterPairsByDictionary(beforePairs, dictionary);
+      const filteredAfterPairs = filterPairsByDictionary(afterPairs, dictionary);
       
-      // Find all unique pairs
-      const allPairs = new Set([
-        ...beforeMap.keys(),
-        ...afterMap.keys()
+      console.log('Filtered before pairs:', Object.keys(filteredBeforePairs).length);
+      console.log('Filtered after pairs:', Object.keys(filteredAfterPairs).length);
+      
+      if (Object.keys(filteredBeforePairs).length === 0 && Object.keys(filteredAfterPairs).length === 0) {
+        setError(`No kerning pairs found after filtering with the "${DICTIONARY_OPTIONS[dictionary]}" dictionary. Try a different dictionary.`);
+        setIsAnalyzing(false);
+        return;
+      }
+      
+      // Find all unique pair keys from the filtered pairs
+      const allPairKeys = new Set([
+        ...Object.keys(filteredBeforePairs),
+        ...Object.keys(filteredAfterPairs)
       ]);
+      
+      console.log('Total unique pair keys:', allPairKeys.size);
       
       // Compare pairs
       const comparisons = [];
@@ -82,10 +381,10 @@ const KerningComparison = () => {
       let onlyInBeforeCount = 0;
       let onlyInAfterCount = 0;
       
-      allPairs.forEach(pairKey => {
+      allPairKeys.forEach(pairKey => {
         const [left, right] = pairKey.split(',');
-        const beforeValue = beforeMap.get(pairKey);
-        const afterValue = afterMap.get(pairKey);
+        const beforeValue = filteredBeforePairs[pairKey];
+        const afterValue = filteredAfterPairs[pairKey];
         
         let status;
         let difference = 0;
@@ -111,12 +410,19 @@ const KerningComparison = () => {
         comparisons.push({
           left,
           right,
+          pair: `${left}${right}`, // Concatenated for display
           beforeValue: beforeValue !== undefined ? beforeValue : null,
           afterValue: afterValue !== undefined ? afterValue : null,
           difference,
           status
         });
       });
+      
+      console.log('Generated comparisons:', comparisons.length);
+      console.log('Matches:', matchCount);
+      console.log('Differences:', differenceCount);
+      console.log('Only in before:', onlyInBeforeCount);
+      console.log('Only in after:', onlyInAfterCount);
       
       // Sort by status and difference magnitude
       comparisons.sort((a, b) => {
@@ -141,45 +447,35 @@ const KerningComparison = () => {
         return a.left.localeCompare(b.left);
       });
       
-      // Potential spacing candidates (pairs with many kerning values)
-      const leftCharFrequency = {};
-      const rightCharFrequency = {};
-      
-      comparisons.forEach(comp => {
-        if (comp.status !== 'match') {
-          leftCharFrequency[comp.left] = (leftCharFrequency[comp.left] || 0) + 1;
-          rightCharFrequency[comp.right] = (rightCharFrequency[comp.right] || 0) + 1;
-        }
+      // Analyze potential spacing candidates
+      const spacingCandidates = analyzePotentialSpacingCandidates({
+        ...filteredBeforePairs,
+        ...filteredAfterPairs
       });
       
-      const highFrequencyThreshold = 5; // Arbitrary threshold
-      
-      const highFrequencyLeft = Object.entries(leftCharFrequency)
-        .filter(([_, count]) => count >= highFrequencyThreshold)
-        .map(([char, count]) => ({ char, count }))
-        .sort((a, b) => b.count - a.count);
-        
-      const highFrequencyRight = Object.entries(rightCharFrequency)
-        .filter(([_, count]) => count >= highFrequencyThreshold)
-        .map(([char, count]) => ({ char, count }))
-        .sort((a, b) => b.count - a.count);
+      // Analyze kerning scope
+      const kerningScope = {
+        before: analyzeKerningScope(filteredBeforePairs),
+        after: analyzeKerningScope(filteredAfterPairs)
+      };
       
       setComparisonResults({
         comparisons,
         stats: {
-          totalPairs: allPairs.size,
+          totalPairs: allPairKeys.size,
           matchCount,
           differenceCount,
           onlyInBeforeCount,
           onlyInAfterCount,
-          beforeTotal: beforePairs.length,
-          afterTotal: afterPairs.length
+          beforeTotal: Object.keys(filteredBeforePairs).length,
+          afterTotal: Object.keys(filteredAfterPairs).length
         },
-        spacingCandidates: {
-          left: highFrequencyLeft,
-          right: highFrequencyRight
-        }
+        spacingCandidates,
+        kerningScope
       });
+      
+      // Reset selected pairs when running a new comparison
+      setSelectedPairs([]);
     } catch (err) {
       console.error('Error analyzing fonts:', err);
       setError(`Error analyzing fonts: ${err.message}`);
@@ -190,131 +486,47 @@ const KerningComparison = () => {
 
   // Filter comparisons based on active filter
   const getFilteredComparisons = () => {
-    if (!comparisonResults) return [];
+    if (!comparisonResults) {
+      console.log('No comparison results available');
+      return [];
+    }
+    
+    console.log('Raw comparisons count:', comparisonResults.comparisons.length);
     
     let filtered = [...comparisonResults.comparisons];
     
     // Apply status filter
     if (activeFilter !== 'all') {
       filtered = filtered.filter(comp => comp.status === activeFilter);
+      console.log(`After '${activeFilter}' filter:`, filtered.length);
     }
     
     // Apply differences only filter
     if (showOnlyDifferences) {
       filtered = filtered.filter(comp => comp.status !== 'match');
+      console.log('After differences-only filter:', filtered.length);
     }
     
     return filtered;
   };
-
-  // Font loading component
-  const FontUploader = ({ defaultName, setFont, setFontUrl }) => {
-    const [fontName, setFontName] = useState(defaultName);
-    const [fileName, setFileName] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    
-    const handleFileChange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      setIsLoading(true);
-      setFileName(file.name);
-      
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        // Create a blob URL for the font to use in @font-face
-        const fontUrl = URL.createObjectURL(file);
-        setFontUrl(fontUrl);
-        
-        // In a real implementation, we would use opentype.js to parse the font
-        // For this prototype, we'll simulate the font data structure
-        const font = {
-          kerningPairs: simulateKerningPairs()
-        };
-        
-        setFont({ 
-          data: font, 
-          name: fontName || defaultName,
-          fileName: file.name,
-          blob: fontUrl
-        });
-      } catch (error) {
-        console.error('Error loading font:', error);
-        setError(`Error loading font: ${error.message}`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    // Simulate kerning pairs for demo purposes
-    const simulateKerningPairs = () => {
-      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-      const pairs = {};
-      
-      // Generate some random kerning pairs
-      for (let i = 0; i < 100; i++) {
-        const left = chars[Math.floor(Math.random() * chars.length)];
-        const right = chars[Math.floor(Math.random() * chars.length)];
-        const value = Math.floor(Math.random() * 100) - 50; // Random value between -50 and 50
-        
-        pairs[`${left},${right}`] = value;
-      }
-      
-      return pairs;
-    };
-
-    return (
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Font Name</label>
-          <input 
-            type="text"
-            className="w-full px-3 py-2 border rounded-md"
-            value={fontName} 
-            onChange={(e) => setFontName(e.target.value)}
-            placeholder={defaultName}
-          />
-        </div>
-        
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Upload Font File</label>
-          <div className="border border-dashed rounded-md p-6 flex flex-col items-center justify-center bg-gray-50">
-            <UploadCloud className="mb-2 h-8 w-8 text-gray-400" />
-            <p className="text-sm text-gray-500 mb-2">Drag and drop or click to upload</p>
-            <input
-              type="file"
-              accept=".ttf,.otf,.woff,.woff2"
-              onChange={handleFileChange}
-              className="hidden"
-              id={`font-file-${defaultName}`}
-            />
-            <button 
-              className="px-4 py-2 text-sm border rounded-md bg-white hover:bg-gray-50"
-              onClick={() => document.getElementById(`font-file-${defaultName}`).click()}
-              disabled={isLoading}
-            >
-              {isLoading ? 'Loading...' : 'Select Font'}
-            </button>
-            {fileName && (
-              <p className="mt-2 text-sm text-gray-500">{fileName}</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  
+  // Select a pair for detailed comparison
+  const handlePairSelect = (pair) => {
+    if (selectedPairs.includes(pair)) {
+      setSelectedPairs(selectedPairs.filter(p => p !== pair));
+    } else {
+      setSelectedPairs([...selectedPairs, pair]);
+    }
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Font Kerning Comparison Tool</h1>
-        <p className="text-gray-500">
-          Upload two fonts to compare their kerning tables and visualize differences
-        </p>
+    <div className="mx-auto py-4 space-y-6 max-w-5xl">
+      <div>
+        <h1 className="text-2xl font-bold">Kern Compare</h1>
       </div>
       
-      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-        <h2 className="text-xl font-bold mb-4">Font Settings</h2>
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <h2 className="text-lg font-bold mb-4">Font Settings</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
           <FontUploader 
             defaultName="Before" 
@@ -333,7 +545,7 @@ const KerningComparison = () => {
             <label className="text-sm font-medium">Units of Discrepancy: {discrepancyUnits}</label>
             <input 
               type="range" 
-              min="1" 
+              min="0" 
               max="100" 
               value={discrepancyUnits}
               onChange={(e) => setDiscrepancyUnits(parseInt(e.target.value))}
@@ -345,19 +557,70 @@ const KerningComparison = () => {
           </div>
           
           <div className="space-y-3">
-            <label className="text-sm font-medium">Dictionary</label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Dictionary</label>
+              <button 
+                onClick={() => setShowDictionaryInfo(!showDictionaryInfo)}
+                className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                aria-label="Dictionary info"
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </div>
+            
             <select 
               value={dictionary} 
               onChange={(e) => setDictionary(e.target.value)}
               className="w-full px-3 py-2 border rounded-md"
             >
-              {Object.entries(DICTIONARIES).map(([value, label]) => (
+              {Object.entries(DICTIONARY_OPTIONS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+            
             <p className="text-sm text-gray-500">
-              Choose which character set to compare
+              {getDictionary(dictionary).description}
             </p>
+            
+            {dictionary === 'custom' && (
+              <div className="mt-2">
+                <label className="text-sm font-medium">Custom Characters</label>
+                <textarea
+                  className="w-full px-3 py-2 border rounded-md mt-1 font-mono"
+                  rows={3}
+                  value={customDictionary}
+                  onChange={(e) => setCustomDictionary(e.target.value)}
+                  placeholder="Enter the characters you want to include..."
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  These characters will be used to filter kerning pairs for comparison.
+                </p>
+              </div>
+            )}
+            
+            {showDictionaryInfo && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-2">
+                <h4 className="text-sm font-medium mb-1">About Dictionaries</h4>
+                <p className="text-xs text-blue-800">
+                  Dictionaries define which character sets will be analyzed in the kerning comparison. 
+                  Different dictionaries focus on different aspects of typography:
+                </p>
+                <ul className="text-xs text-blue-800 mt-1 list-disc pl-4 space-y-1">
+                  <li><strong>Latin Normal:</strong> Standard Latin characters</li>
+                  <li><strong>Latin Concise:</strong> Focused set of essential characters</li>
+                  <li><strong>Latin Expansive:</strong> Comprehensive character set</li>
+                  <li><strong>Latin + Punctuation:</strong> Focus on punctuation kerning</li>
+                  <li><strong>Numbers:</strong> Numeric characters and monetary symbols</li>
+                  <li><strong>Custom:</strong> Define your own character set</li>
+                </ul>
+                <button 
+                  onClick={() => setShowDictionaryInfo(false)}
+                  className="text-xs text-blue-800 underline mt-2"
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
         
@@ -371,7 +634,7 @@ const KerningComparison = () => {
       </div>
       
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-8 flex items-start">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md flex items-start">
           <AlertTriangle className="h-5 w-5 mr-2" />
           <div>
             <p className="font-medium">Error</p>
@@ -382,41 +645,8 @@ const KerningComparison = () => {
       
       {/* Font Preview Section */}
       {fontBefore && fontAfter && (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold">Font Preview</h2>
-            <div className="flex items-center space-x-2">
-              <button 
-                onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
-                className="p-1 rounded-md border hover:bg-gray-50"
-                aria-label="Decrease size"
-              >
-                <ZoomOut className="h-5 w-5" />
-              </button>
-              <span className="text-sm text-gray-600">{previewSize}px</span>
-              <button 
-                onClick={() => setPreviewSize(Math.min(96, previewSize + 4))}
-                className="p-1 rounded-md border hover:bg-gray-50"
-                aria-label="Increase size"
-              >
-                <ZoomIn className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-          
-          <div className="mb-4">
-            <label className="text-sm font-medium block mb-2">Sample Text</label>
-            <div className="flex items-center">
-              <Type className="h-5 w-5 mr-2 text-gray-400" />
-              <input
-                type="text"
-                value={previewText}
-                onChange={(e) => setPreviewText(e.target.value)}
-                placeholder="Enter text to preview"
-                className="w-full px-3 py-2 border rounded-md"
-              />
-            </div>
-          </div>
+        <div className="bg-white rounded-lg shadow-sm border p-6">
+          <h2 className="text-lg font-bold mb-4">Font Preview</h2>
           
           {/* Font preview styles */}
           <style dangerouslySetInnerHTML={{
@@ -437,92 +667,22 @@ const KerningComparison = () => {
             `
           }} />
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border rounded-md p-4">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">{fontBefore.name}</h3>
-              <div 
-                style={{ 
-                  fontFamily: 'FontBefore', 
-                  fontSize: `${previewSize}px`, 
-                  lineHeight: 1.2,
-                  textRendering: 'optimizeLegibility'
-                }}
-                className="min-h-16 p-3 border rounded-md bg-gray-50"
-              >
-                {previewText || 'Typography'}
-              </div>
-            </div>
-            
-            <div className="border rounded-md p-4">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">{fontAfter.name}</h3>
-              <div 
-                style={{ 
-                  fontFamily: 'FontAfter', 
-                  fontSize: `${previewSize}px`, 
-                  lineHeight: 1.2,
-                  textRendering: 'optimizeLegibility'
-                }}
-                className="min-h-16 p-3 border rounded-md bg-gray-50"
-              >
-                {previewText || 'Typography'}
-              </div>
-            </div>
-          </div>
-          
-          {/* Common kerning pair preview */}
-          <div className="mt-6">
-            <h3 className="text-lg font-medium mb-4">Common Kerning Pairs Preview</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h4 className="text-sm font-medium text-gray-500 mb-2">{fontBefore.name}</h4>
-                <div className="space-y-2">
-                  {['AV', 'To', 'Wa', 'Yo', 'LT', 'Pa', 'Ta', 'Te'].map(pair => (
-                    <div key={pair} className="flex justify-between items-center p-2 border rounded">
-                      <span className="font-medium text-sm">{pair}</span>
-                      <span 
-                        style={{ 
-                          fontFamily: 'FontBefore', 
-                          fontSize: `${previewSize/1.5}px`,
-                          textRendering: 'optimizeLegibility'
-                        }}
-                      >
-                        {pair}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              <div>
-                <h4 className="text-sm font-medium text-gray-500 mb-2">{fontAfter.name}</h4>
-                <div className="space-y-2">
-                  {['AV', 'To', 'Wa', 'Yo', 'LT', 'Pa', 'Ta', 'Te'].map(pair => (
-                    <div key={pair} className="flex justify-between items-center p-2 border rounded">
-                      <span className="font-medium text-sm">{pair}</span>
-                      <span 
-                        style={{ 
-                          fontFamily: 'FontAfter', 
-                          fontSize: `${previewSize/1.5}px`,
-                          textRendering: 'optimizeLegibility'
-                        }}
-                      >
-                        {pair}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+          <KerningPreview 
+            fontBefore={fontBefore}
+            fontAfter={fontAfter}
+            selectedPairs={selectedPairs}
+            dictionaryId={dictionary}
+          />
         </div>
       )}
       
       {comparisonResults && (
         <>
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-            <h2 className="text-xl font-bold mb-4">Comparison Results</h2>
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-bold mb-4">Comparison Results</h2>
             <p className="text-gray-500 mb-6">
               Comparing {fontBefore.name} ({fontBefore.fileName}) with {fontAfter.name} ({fontAfter.fileName})
+              using the {DICTIONARY_OPTIONS[dictionary]} dictionary
             </p>
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -547,15 +707,41 @@ const KerningComparison = () => {
             </div>
             
             <div className="mb-6">
+              <h3 className="text-lg font-medium mb-3">Character Coverage</h3>
+              <p className="text-sm text-gray-500 mb-2">
+                Characters included in the {DICTIONARY_OPTIONS[dictionary]} dictionary:
+              </p>
+              <div className="p-3 bg-gray-50 rounded-md font-mono text-sm overflow-x-auto whitespace-nowrap">
+                {getDictionary(dictionary).characters}
+              </div>
+            </div>
+            
+            <div className="mb-6">
               <h3 className="text-lg font-medium mb-3">Kerning Table Size</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-gray-50 rounded-md p-4">
                   <p className="text-sm text-gray-500">{fontBefore.name} Pairs</p>
-                  <p className="text-xl font-medium">{comparisonResults.stats.beforeTotal}</p>
+                  <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
+                  <div className="mt-2 text-xs text-gray-500">
+                    {comparisonResults.kerningScope?.before.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                    {comparisonResults.kerningScope?.before.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                    {comparisonResults.kerningScope?.before.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                    {comparisonResults.kerningScope?.before.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                    {comparisonResults.kerningScope?.before.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                    {comparisonResults.kerningScope?.before.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                  </div>
                 </div>
                 <div className="bg-gray-50 rounded-md p-4">
                   <p className="text-sm text-gray-500">{fontAfter.name} Pairs</p>
-                  <p className="text-xl font-medium">{comparisonResults.stats.afterTotal}</p>
+                  <p className="text-lg font-medium">{comparisonResults.stats.afterTotal}</p>
+                  <div className="mt-2 text-xs text-gray-500">
+                    {comparisonResults.kerningScope?.after.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                    {comparisonResults.kerningScope?.after.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                    {comparisonResults.kerningScope?.after.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                    {comparisonResults.kerningScope?.after.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                    {comparisonResults.kerningScope?.after.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                    {comparisonResults.kerningScope?.after.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -598,14 +784,14 @@ const KerningComparison = () => {
             </div>
           </div>
           
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-bold mb-4">Side-by-Side Comparison</h2>
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-bold mb-4">Side-by-Side Comparison</h2>
             <p className="text-gray-500 mb-6">
               Visual comparison of kerning pairs between fonts
             </p>
             
             <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-              <div className="inline-flex rounded-md shadow-sm" role="group">
+              <div className="inline-flex rounded-md shadow-sm border" role="group">
                 <button
                   type="button"
                   onClick={() => setActiveFilter('all')}
@@ -620,7 +806,7 @@ const KerningComparison = () => {
                 <button
                   type="button"
                   onClick={() => setActiveFilter('different')}
-                  className={`px-4 py-2 text-sm font-medium border-t border-b ${
+                  className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
                     activeFilter === 'different' 
                     ? 'bg-blue-50 text-blue-700 border-blue-300' 
                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -631,7 +817,7 @@ const KerningComparison = () => {
                 <button
                   type="button"
                   onClick={() => setActiveFilter('only-before')}
-                  className={`px-4 py-2 text-sm font-medium border-t border-b ${
+                  className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
                     activeFilter === 'only-before' 
                     ? 'bg-blue-50 text-blue-700 border-blue-300' 
                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -686,12 +872,13 @@ const KerningComparison = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontAfter.name}</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Difference</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {getFilteredComparisons().map((comp, idx) => (
                     <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4">
                         <div className="flex items-center space-x-3">
                           <div className="font-mono">{comp.left},{comp.right}</div>
                           {/* Visual preview of the pair */}
@@ -704,7 +891,7 @@ const KerningComparison = () => {
                               }}
                               className="text-gray-700"
                             >
-                              {comp.left}{comp.right}
+                              {comp.pair}
                             </span>
                             <span 
                               style={{ 
@@ -714,7 +901,7 @@ const KerningComparison = () => {
                               }}
                               className="text-gray-700"
                             >
-                              {comp.left}{comp.right}
+                              {comp.pair}
                             </span>
                           </div>
                         </div>
@@ -755,6 +942,18 @@ const KerningComparison = () => {
                             Only in {fontAfter.name}
                           </span>
                         )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => handlePairSelect(comp.pair)}
+                          className={`px-2 py-1 text-xs font-medium rounded ${
+                            selectedPairs.includes(comp.pair)
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {selectedPairs.includes(comp.pair) ? 'Selected' : 'Select for Preview'}
+                        </button>
                       </td>
                     </tr>
                   ))}

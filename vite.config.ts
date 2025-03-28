@@ -5,7 +5,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/font-kerning-comparison/', // Replace with your repository name
+  base: '/kern-compare/', // Replace with your repository name
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
