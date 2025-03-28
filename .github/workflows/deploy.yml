@@ -49,12 +49,7 @@ jobs:
     name: Deploy
     needs: build
     runs-on: ubuntu-latest
-    steps:
-      - name: Download artifact
-        uses: actions/download-pages-artifact@v3
-        with:
-          name: github-pages
-      
+    steps:      
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v2
+        uses: actions/deploy-pages@v4
