@@ -22,6 +22,7 @@ export interface FontData {
     status: 'match' | 'different' | 'only-before' | 'only-after';
   }
   
+  // Update the KerningComparison interface
   export interface KerningComparison {
     comparisons: ComparisonItem[];
     stats: {
@@ -34,8 +35,14 @@ export interface FontData {
       afterTotal: number;
     };
     spacingCandidates: {
-      left: { char: string; count: number }[];
-      right: { char: string; count: number }[];
+      before: {
+        left: { char: string; count: number }[];
+        right: { char: string; count: number }[];
+      };
+      after: {
+        left: { char: string; count: number }[];
+        right: { char: string; count: number }[];
+      };
     };
     kerningScope: {
       before: {
