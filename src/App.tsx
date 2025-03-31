@@ -217,8 +217,8 @@ const KerningComparison = () => {
   const [fontSecondUrl, setFontSecondUrl] = useState<string | null>(null);
   const [showDictionaryInfo, setShowDictionaryInfo] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [previewSize, setPreviewSize] = useState(36); // For the side-by-side comparison view
-  const [overlaySize, setOverlaySize] = useState(144); // New state for the overlay view
+  const [previewSize, setPreviewSize] = useState(36); // For side-by-side comparison view
+  const [overlaySize, setOverlaySize] = useState(300); // For overlay view
 
   // Add these functions to update the font names
   const updateFirstFontName = (name: string) => {
@@ -242,15 +242,12 @@ const KerningComparison = () => {
   // Add this new state variable at the beginning of your KerningComparison component
   const [activeTab, setActiveTab] = useState('settings'); // Options: 'settings', 'analysis', 'comparison'
 
-  // 1. First, add a new state variable to track the current pair index
   const [currentPairIndex, setCurrentPairIndex] = useState(0);
-
-  // Add these state variables at the top of your KerningComparison component
   const [showOutlierInfo, setShowOutlierInfo] = useState(false);
   const [showSymmetryInfo, setShowSymmetryInfo] = useState(false);
-
-  // Add this state variable at the top of your KerningComparison component with the other state variables
   const [showPatternInfo, setShowPatternInfo] = useState(false);
+  const [showSpacingInfo, setShowSpacingInfo] = useState(false);
+
 
   // Update custom dictionary when it changes
   useEffect(() => {
@@ -908,10 +905,24 @@ return (
             </div>
             
             <div>
-              <h3 className="text-md font-medium mb-2">Spacing Candidates</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                Characters that appear in many kerning pairs may be candidates for spacing adjustments instead
-              </p>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-md font-medium">Spacing Candidates</h3>
+              <button 
+                onClick={() => setShowSpacingInfo(!showSpacingInfo)}
+                className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                aria-label="Spacing candidates info"
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </div>
+
+            {showSpacingInfo && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                <p className="text-sm text-blue-800">
+                  Characters that appear in many kerning pairs may be candidates for spacing adjustments instead of individual kerning pairs.
+                </p>
+              </div>
+            )}
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {/* First Font */}
