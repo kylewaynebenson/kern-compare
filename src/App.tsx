@@ -80,45 +80,42 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
     setProgress('Loading font...');
     
     try {
-      // Load font and extract kerning information
+      // Load font and extract ONLY explicit kerning information
       const fontData = await loadFontAndExtractKerning(file);
       setProgress('Extracting kerning data...');
       
-      // Calculate some statistics
+      // Use the exact kerning count - no estimation
       const extractedKerningCount = Object.keys(fontData.kerningPairs).length;
       setKerningCount(extractedKerningCount);
       
       // Try to get font name from the file metadata
       let detectedName = '';
       
-      // Try to extract name from font metadata
       if (fontData.font.names?.fullName?.en) {
         detectedName = fontData.font.names.fullName.en;
       } else if (file.name) {
-        // Use file name without extension as fallback
         detectedName = file.name.replace(/\.(ttf|otf|woff|woff2)$/i, '');
       }
       
-      // Only update the name if user hasn't modified it manually
       let nameToUse = fontName;
       if (!userModifiedName && detectedName) {
         setFontName(detectedName);
         nameToUse = detectedName;
         
-        // Call updateFontName when auto-detecting
         if (updateFontName) {
           updateFontName(detectedName);
         }
       }
       
       // Set font data with the name we've determined
+      // No fallbacks or estimations for kerning data
       setFont({
         data: fontData.font,
-        name: nameToUse, // Use either user's custom name or detected name
+        name: nameToUse,
         fileName: file.name,
         url: fontData.url,
-        kerningPairs: fontData.kerningPairs,
-        kerningCount: extractedKerningCount, // Use exact count, no estimates
+        kerningPairs: fontData.kerningPairs,  // Use only explicit kerning
+        kerningCount: extractedKerningCount,  // Exact count
         glyphCount: fontData.glyphCount,
         unitsPerEm: fontData.unitsPerEm,
         format: fontData.format
@@ -127,20 +124,22 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
       // Set font URL for CSS
       setFontUrl(fontData.url);
       
-      // Show warning if no kerning pairs were found
+      // Make no-kerning warning more prominent
       if (extractedKerningCount === 0) {
-        setProgress(`Warning: No kerning pairs found in this font.`);
+        setProgress(`Warning: No kerning pairs found in this font file.`);
         setTimeout(() => {
           setProgress(null);
         }, 5000);
       } else {
-        setProgress(null);
+        setProgress(`Successfully extracted ${extractedKerningCount} kerning pairs.`);
+        setTimeout(() => {
+          setProgress(null);
+        }, 3000);
       }
     } catch (error) {
       console.error('Error loading font:', error);
       setProgress(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       
-      // Clear after 3 seconds
       setTimeout(() => {
         setProgress(null);
       }, 3000);
@@ -215,9 +214,9 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
               <p className="text-sm text-gray-500">{progress || (isDragging ? "Drop to upload font file" : "Select or drop a font file")}</p>
             )}
             {fileName && kerningCount !== null && (
-              <p className={`text-xs ${kerningCount === 0 ? 'text-red-500 font-medium' : 'text-gray-500'}`}>
+              <p className={`text-xs ${kerningCount === 0 ? 'text-gray-500' : 'text-gray-500'}`}>
                 {kerningCount === 0 
-                  ? 'No kerning pairs found in this font!' 
+                  ? 'No kerning pairs found' 
                   : `${kerningCount.toLocaleString()} kerning pairs extracted`}
               </p>
             )}
@@ -272,7 +271,10 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
       {kerningCount === 0 && fileName && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
           <p className="text-sm font-medium">No kerning pairs found</p>
-          <p className="text-xs">This font doesn't contain any kerning information. Comparisons will be limited.</p>
+            <ul className="text-xs list-disc list-inside">
+            <li>Might not include explicit kerning data.</li>
+            <li>Kerning might be stored in a format not supported.</li>
+            </ul>
         </div>
       )}
     </div>
@@ -347,25 +349,25 @@ const KerningComparison = () => {
     setError(null);
     
     try {
-      // Get kerning pairs from both fonts
+      // Get ONLY explicit kerning pairs from both fonts
       const firstPairs = fontFirst.kerningPairs || {};
       const secondPairs = fontSecond.kerningPairs || {};
       
-      console.log('First kerning pairs:', Object.keys(firstPairs).length);
-      console.log('Second kerning pairs:', Object.keys(secondPairs).length);
+      console.log('First font kerning pairs:', Object.keys(firstPairs).length);
+      console.log('Second font kerning pairs:', Object.keys(secondPairs).length);
       
       // Check if either font has no kerning pairs
       if (Object.keys(firstPairs).length === 0 && Object.keys(secondPairs).length === 0) {
-        setError('No kerning pairs found in either font. Upload fonts with kerning data to perform a comparison.');
+        setError('No kerning pairs found in either font. Both fonts lack explicit kerning data.');
         setIsAnalyzing(false);
         return;
       }
       
-      // Specific warnings about which font is missing kerning
+      // Clear warning messages about which font is missing kerning
       if (Object.keys(firstPairs).length === 0) {
-        setError(`${fontFirst.name} has no kerning pairs. Comparison will only show pairs from ${fontSecond.name}.`);
+        setError(`${fontFirst.name} has no explicit kerning data. Comparison will only show pairs from ${fontSecond.name}.`);
       } else if (Object.keys(secondPairs).length === 0) {
-        setError(`${fontSecond.name} has no kerning pairs. Comparison will only show pairs from ${fontFirst.name}.`);
+        setError(`${fontSecond.name} has no explicit kerning data. Comparison will only show pairs from ${fontFirst.name}.`);
       }
       
       // Filter pairs based on selected dictionary
@@ -819,11 +821,12 @@ return (
         
         {/* Show error messages regardless of active tab */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md flex items-start">
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-md flex items-start mb-4">
             <AlertTriangle className="h-5 w-5 mr-2" />
             <div>
-              <p className="font-medium">Error</p>
-              <p>{error}</p>
+              <p>
+                <span className="font-medium">Error:</span> {error}
+              </p>
             </div>
           </div>
         )}

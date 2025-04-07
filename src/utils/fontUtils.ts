@@ -100,214 +100,44 @@ const extractKerningPairs = (font: Font): Record<string, number> => {
 };
 
 /**
- * Canvas-based kerning detection as a fallback
- */
-const tryCanvasMetricsApproach = async (file: File): Promise<Record<string, number>> => {
-  // Create a blob URL for the font
-  const fontUrl = URL.createObjectURL(file);
-  const fontName = "tempFont" + Math.floor(Math.random() * 10000);
-  
-  // Add a temporary style element to load the font
-  const style = document.createElement('style');
-  style.textContent = `
-    @font-face {
-      font-family: '${fontName}';
-      src: url('${fontUrl}') format('truetype');
-      font-weight: normal;
-      font-style: normal;
-    }
-  `;
-  document.head.appendChild(style);
-  
-  // Wait for the font to load
-  try {
-    await document.fonts.load(`16px ${fontName}`);
-    console.log(`Font ${fontName} loaded for canvas measurements`);
-  } catch (e) {
-    const error = e as Error;
-    console.error('Error loading font for canvas:', error);
-    document.head.removeChild(style);
-    URL.revokeObjectURL(fontUrl);
-    return {};
-  }
-  
-  // Create a temporary canvas element
-  const canvas = document.createElement('canvas');
-  canvas.width = 500;
-  canvas.height = 100;
-  const ctx = canvas.getContext('2d');
-  
-  if (!ctx) {
-    console.error('Could not get canvas context');
-    document.head.removeChild(style);
-    URL.revokeObjectURL(fontUrl);
-    return {};
-  }
-  
-  // Set the font
-  ctx.font = `32px ${fontName}`;
-  
-  // Problem pairs that often need kerning
-  const testPairs = [
-    'AV', 'AW', 'AY', 'FA', 'LT', 'PA', 'TA', 'Th', 'Tr', 'Tu', 'Ty', 'VA', 'WA', 'We', 'Yo',
-    'av', 'aw', 'ay', 'fa', 'fi', 'fl', 'lt', 'ty', 'va', 'wa', 'we'
-  ];
-  
-  // Detect kerning by comparing widths
-  const kerningPairs: Record<string, number> = {};
-  
-  for (const pair of testPairs) {
-    if (pair.length !== 2) continue;
-    
-    const char1 = pair[0];
-    const char2 = pair[1];
-    
-    // Measure individual characters
-    const width1 = ctx.measureText(char1).width;
-    const width2 = ctx.measureText(char2).width;
-    const individualSum = width1 + width2;
-    
-    // Measure the pair
-    const pairWidth = ctx.measureText(pair).width;
-    
-    // If there's a difference, there might be kerning
-    const diff = pairWidth - individualSum;
-    
-    // Only record if there's a noticeable difference
-    if (Math.abs(diff) > 0.5) {
-      kerningPairs[`${char1},${char2}`] = Math.round(diff * -64); // Convert to font units (approximate)
-      console.log(`Detected kerning in ${pair}: ${diff.toFixed(2)}px (approx ${kerningPairs[`${char1},${char2}`]} units)`);
-    }
-  }
-  
-  // Clean up
-  document.head.removeChild(style);
-  URL.revokeObjectURL(fontUrl);
-  
-  return kerningPairs;
-};
-
-/**
- * Generate synthetic kerning data for demonstration
- */
-const generateSyntheticKerning = (font: Font): Record<string, number> => {
-  const pairs: Record<string, number> = {};
-  const unitsPerEm = font?.unitsPerEm || 1000;
-  
-  // Common kerning pairs with typical values
-  const commonPairs: Record<string, number> = {
-    'A,V': -0.07, 'A,W': -0.06, 'A,Y': -0.08, 'F,a': -0.03, 
-    'L,T': -0.08, 'P,a': -0.03, 'T,a': -0.06, 'T,o': -0.06, 
-    'V,a': -0.05, 'W,a': -0.04, 'Y,o': -0.07,
-    'f,i': -0.02, 'r,a': -0.02, 'T,y': -0.06
-  };
-  
-  // Convert percentage-based values to font units
-  for (const [pair, value] of Object.entries(commonPairs)) {
-    pairs[pair] = Math.round(value * unitsPerEm);
-  }
-  
-  console.log(`Generated ${Object.keys(pairs).length} synthetic kerning pairs`);
-  return pairs;
-};
-
-/**
  * Load font and extract kerning using built-in methods
+ * Only extracts explicit kerning from font tables - no synthetic or estimated values
  */
-const loadFontAndExtractKerning = async (file: File): Promise<FontData> => {
-  if (!file) {
-    throw new Error('No file provided');
+async function loadFontAndExtractKerning(file: File): Promise<FontData> {
+  const arrayBuffer = await file.arrayBuffer();
+  const font = opentype.parse(arrayBuffer);
+  
+  // Extract ONLY explicit kerning pairs from the font
+  let kerningPairs: Record<string, number> = {};
+  
+  // Use the extraction method that relies solely on the font's kerning tables
+  if (font) {
+    kerningPairs = extractKerningPairs(font);
   }
   
-  try {
-    // Create a blob URL for the font
-    const fontUrl = URL.createObjectURL(file);
-    
-    // Load the font using opentype.js - Fix the type conversion
-    const originalFont = await opentype.load(fontUrl);
-    
-    // Create a compatible Font object with the structure we need
-    const font: Font = {
-      ...originalFont as any, // Base properties
-      unitsPerEm: originalFont.unitsPerEm,
-      charToGlyph: originalFont.charToGlyph.bind(originalFont),
-      getKerningValue: originalFont.getKerningValue.bind(originalFont),
-      outlinesFormat: (originalFont as any).outlinesFormat,
-      // Map the nested names structure if needed
-      names: {
-        fullName: {
-          en: originalFont.names.fullName ? 
-            (originalFont.names.fullName as any).en || file.name : 
-            file.name
-        }
-      },
-      // Map tables to our simplified structure
-      tables: originalFont.tables as Record<string, any>
-    };
-    
-    // Check if the necessary methods exist
-    if (typeof font.getKerningValue === 'function' && typeof font.charToGlyph === 'function') {
-      console.log('Font has built-in kerning methods, using direct approach');
-    } else {
-      console.warn('Font is missing built-in kerning methods!');
-      // Could add fallback here if needed
-    }
-    
-    // Extract kerning pairs
-    const kerningPairs = extractKerningPairs(font);
-    
-    // If no kerning found, try canvas-based approach as fallback
-    if (Object.keys(kerningPairs).length === 0) {
-      console.log('No kerning pairs found with built-in methods, trying canvas approach...');
-      const canvasKerning = await tryCanvasMetricsApproach(file);
-      
-      if (Object.keys(canvasKerning).length > 0) {
-        console.log(`Found ${Object.keys(canvasKerning).length} kerning pairs using canvas approach`);
-        return {
-          font,
-          url: fontUrl,
-          name: font.names?.fullName?.en || file.name,
-          fileName: file.name,
-          kerningPairs: canvasKerning,
-          glyphCount: font.glyphs?.length || 0,
-          unitsPerEm: font.unitsPerEm || 1000,
-          format: font.outlinesFormat || 'unknown',
-          note: 'Kerning extracted via canvas (approximate)'
-        };
-      }
-      
-      // If canvas method also fails, use synthetic data
-      console.log('Canvas approach failed, generating synthetic data...');
-      const syntheticKerning = generateSyntheticKerning(font);
-      return {
-        font,
-        url: fontUrl,
-        name: font.names?.fullName?.en || file.name,
-        fileName: file.name,
-        kerningPairs: syntheticKerning,
-        glyphCount: font.glyphs?.length || 0,
-        unitsPerEm: font.unitsPerEm || 1000,
-        format: font.outlinesFormat || 'unknown',
-        note: 'Using synthetic kerning data for demonstration'
-      };
-    }
-    
-    return {
-      font,
-      url: fontUrl,
-      name: font.names && font.names.fullName ? font.names.fullName.en : file.name,
-      fileName: file.name,
-      kerningPairs,
-      glyphCount: font.glyphs ? font.glyphs.length : 0,
-      unitsPerEm: font.unitsPerEm,
-      format: font.outlinesFormat || 'unknown'
-    };
-  } catch (error) {
-    const err = error as Error;
-    console.error('Error loading font:', err);
-    throw new Error(`Failed to load font: ${err.message}`);
-  }
-};
+  // Get basic font info
+  const format = file.name.toLowerCase().endsWith('.otf') ? 'opentype' : 
+                file.name.toLowerCase().endsWith('.woff') ? 'woff' :
+                file.name.toLowerCase().endsWith('.woff2') ? 'woff2' : 'truetype';
+                
+  const glyphCount = font.glyphs?.length || 0;
+  const unitsPerEm = font.unitsPerEm || 1000;
+  
+  // Create object URL for font preview
+  const url = URL.createObjectURL(file);
+  
+  // Return the font data with only explicit kerning pairs
+  return {
+    font,
+    kerningPairs,
+    glyphCount,
+    unitsPerEm,
+    format,
+    url,
+    name: '',  // Will be set later
+    fileName: file.name
+  };
+}
   
 /**
  * Convert glyph names or IDs to Unicode characters where possible
@@ -496,8 +326,6 @@ const analyzeKerningScope = (kerningPairs: Record<string, number>): KerningScope
 
 export {
   extractKerningPairs,
-  loadFontAndExtractKerning,
-  tryCanvasMetricsApproach,
   analyzePotentialSpacingCandidates,
   analyzeKerningScope,
   handleFileChange,
@@ -510,3 +338,6 @@ export {
   type FontState,
   type UploadHandlerOptions
 };
+
+// Export the loadFontAndExtractKerning function separately
+export { loadFontAndExtractKerning };
