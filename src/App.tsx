@@ -57,6 +57,8 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [userModifiedName, setUserModifiedName] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [kerningCount, setKerningCount] = useState<number | null>(null);
   
   // Track when user modifies the name manually
   const handleNameChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -70,8 +72,7 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
     }
   };
   
-  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const processFile = async (file: File) => {
     if (!file) return;
     
     setIsLoading(true);
@@ -84,7 +85,8 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
       setProgress('Extracting kerning data...');
       
       // Calculate some statistics
-      const kerningCount = Object.keys(fontData.kerningPairs).length;
+      const extractedKerningCount = Object.keys(fontData.kerningPairs).length;
+      setKerningCount(extractedKerningCount);
       
       // Try to get font name from the file metadata
       let detectedName = '';
@@ -116,7 +118,7 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
         fileName: file.name,
         url: fontData.url,
         kerningPairs: fontData.kerningPairs,
-        kerningCount,
+        kerningCount: extractedKerningCount, // Use exact count, no estimates
         glyphCount: fontData.glyphCount,
         unitsPerEm: fontData.unitsPerEm,
         format: fontData.format
@@ -125,7 +127,15 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
       // Set font URL for CSS
       setFontUrl(fontData.url);
       
-      setProgress(null);
+      // Show warning if no kerning pairs were found
+      if (extractedKerningCount === 0) {
+        setProgress(`Warning: No kerning pairs found in this font.`);
+        setTimeout(() => {
+          setProgress(null);
+        }, 5000);
+      } else {
+        setProgress(null);
+      }
     } catch (error) {
       console.error('Error loading font:', error);
       setProgress(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -138,18 +148,78 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
       setIsLoading(false);
     }
   };
+  
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processFile(file);
+    }
+  };
+  
+  // Handle drag events
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+  
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      // Check if it's a valid font file
+      if (/\.(ttf|otf|woff|woff2)$/i.test(file.name)) {
+        await processFile(file);
+      } else {
+        setProgress(`Error: Invalid file format. Please upload a TTF, OTF, WOFF, or WOFF2 file.`);
+        
+        // Clear after 3 seconds
+        setTimeout(() => {
+          setProgress(null);
+        }, 3000);
+      }
+    }
+  };
 
   return (
     <div className="space-y-3">
       <div className="space-y-2">
         <label className="text-sm font-medium">Upload Font File</label>
-        <div className="border border-dashed rounded-md p-4 bg-gray-50 flex items-center">
-          <UploadCloud className="h-6 w-6 text-gray-400 mr-2 flex-shrink-0" />
+        <div 
+          className={`border ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-dashed'} rounded-md p-4 ${isDragging ? 'bg-blue-50' : 'bg-gray-50'} flex items-center`}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <UploadCloud className={`h-6 w-6 ${isDragging ? 'text-blue-400' : 'text-gray-400'} mr-2 flex-shrink-0`} />
           <div className="flex-1 min-w-0">
             {fileName ? (
               <p className="text-sm text-gray-700 truncate" title={fileName}>{fileName}</p>
             ) : (
-              <p className="text-sm text-gray-500">{progress || "Select or drop a font file"}</p>
+              <p className="text-sm text-gray-500">{progress || (isDragging ? "Drop to upload font file" : "Select or drop a font file")}</p>
+            )}
+            {fileName && kerningCount !== null && (
+              <p className={`text-xs ${kerningCount === 0 ? 'text-red-500 font-medium' : 'text-gray-500'}`}>
+                {kerningCount === 0 
+                  ? 'No kerning pairs found in this font!' 
+                  : `${kerningCount.toLocaleString()} kerning pairs extracted`}
+              </p>
             )}
           </div>
           <input
@@ -196,6 +266,14 @@ const FontUploader = ({ defaultName, setFont, setFontUrl, updateFontName }: Font
           >
             AaBbCc
           </div>
+      )}
+
+      {/* Warning if no kerning pairs */}
+      {kerningCount === 0 && fileName && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+          <p className="text-sm font-medium">No kerning pairs found</p>
+          <p className="text-xs">This font doesn't contain any kerning information. Comparisons will be limited.</p>
+        </div>
       )}
     </div>
   );
@@ -276,10 +354,18 @@ const KerningComparison = () => {
       console.log('First kerning pairs:', Object.keys(firstPairs).length);
       console.log('Second kerning pairs:', Object.keys(secondPairs).length);
       
+      // Check if either font has no kerning pairs
       if (Object.keys(firstPairs).length === 0 && Object.keys(secondPairs).length === 0) {
-        setError('No kerning pairs found in either font. Try a different font file or check font format support.');
+        setError('No kerning pairs found in either font. Upload fonts with kerning data to perform a comparison.');
         setIsAnalyzing(false);
         return;
+      }
+      
+      // Specific warnings about which font is missing kerning
+      if (Object.keys(firstPairs).length === 0) {
+        setError(`${fontFirst.name} has no kerning pairs. Comparison will only show pairs from ${fontSecond.name}.`);
+      } else if (Object.keys(secondPairs).length === 0) {
+        setError(`${fontSecond.name} has no kerning pairs. Comparison will only show pairs from ${fontFirst.name}.`);
       }
       
       // Filter pairs based on selected dictionary
@@ -289,8 +375,9 @@ const KerningComparison = () => {
       console.log('Filtered first pairs:', Object.keys(filteredFirstPairs).length);
       console.log('Filtered second pairs:', Object.keys(filteredSecondPairs).length);
       
+      // Check if filtering removed all pairs
       if (Object.keys(filteredFirstPairs).length === 0 && Object.keys(filteredSecondPairs).length === 0) {
-        setError(`No kerning pairs found after filtering with the "${DICTIONARY_OPTIONS[dictionary]}" dictionary. Try a different dictionary.`);
+        setError(`No kerning pairs match the "${DICTIONARY_OPTIONS[dictionary]}" dictionary. Try a different dictionary.`);
         setIsAnalyzing(false);
         return;
       }
@@ -656,8 +743,8 @@ return (
           {/* Logo and title on the left */}
           <a className="flex items-center gap-2" href="http://github.com/kylewaynebenson/kern-compare" target="_blank" rel="noopener noreferrer">
             <svg width="35" height="36" viewBox="0 0 306 308" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M279.898 166C277.371 245.444 249.972 308 216.544 308C181.45 308 153 239.052 153 154C153 68.9482 181.45 0 216.544 0C250.112 0 277.601 63.082 279.928 143H237.941C235.852 119.008 227.065 101 216.544 101C204.466 101 194.675 124.729 194.675 154C194.675 183.271 204.466 207 216.544 207C226.919 207 235.606 189.491 237.85 166H279.898Z" fill="#D9D9D9"/>
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M126.898 166C124.371 245.444 96.9718 308 63.5438 308C28.4495 308 0 239.052 0 154C0 68.9482 28.4495 0 63.5438 0C97.112 0 124.601 63.082 126.928 143H84.9412C82.8516 119.008 74.0654 101 63.5438 101C51.4659 101 41.6748 124.729 41.6748 154C41.6748 183.271 51.4659 207 63.5438 207C73.9187 207 82.6063 189.491 84.8499 166H126.898Z" fill="#D9D9D9"/>
+              <path fillRule="evenodd" clipRule="evenodd" d="M279.898 166C277.371 245.444 249.972 308 216.544 308C181.45 308 153 239.052 153 154C153 68.9482 181.45 0 216.544 0C250.112 0 277.601 63.082 279.928 143H237.941C235.852 119.008 227.065 101 216.544 101C204.466 101 194.675 124.729 194.675 154C194.675 183.271 204.466 207 216.544 207C226.919 207 235.606 189.491 237.85 166H279.898Z" fill="#D9D9D9"/>
+              <path fillRule="evenodd" clipRule="evenodd" d="M126.898 166C124.371 245.444 96.9718 308 63.5438 308C28.4495 308 0 239.052 0 154C0 68.9482 28.4495 0 63.5438 0C97.112 0 124.601 63.082 126.928 143H84.9412C82.8516 119.008 74.0654 101 63.5438 101C51.4659 101 41.6748 124.729 41.6748 154C41.6748 183.271 51.4659 207 63.5438 207C73.9187 207 82.6063 189.491 84.8499 166H126.898Z" fill="#D9D9D9"/>
               <rect x="127" width="26" height="308" fill="#FE4C25"/>
               <rect x="280" width="26" height="26" fill="#FE4C25"/>
               <rect x="280" y="103" width="26" height="25" fill="#FE4C25"/>
@@ -742,965 +829,981 @@ return (
         )}
         
         {/* Settings Tab Content */}
-        {activeTab === 'settings' && (
-          <div className="bg-white">
-            <h2 className="text-lg font-bold mb-3 hidden">Settings</h2>
-            {/* Your existing settings content */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
-              <FontUploader 
-                defaultName="First" 
-                setFont={setFontFirst} 
-                setFontUrl={setFontFirstUrl}
-                updateFontName={updateFirstFontName}
-              />
-              <FontUploader 
-                defaultName="Second" 
-                setFont={setFontSecond} 
-                setFontUrl={setFontSecondUrl}
-                updateFontName={updateSecondFontName}
-              />
+        <div className="bg-white" style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+          <h2 className="text-lg font-bold mb-3 hidden">Settings</h2>
+          {/* Your existing settings content */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+            <FontUploader 
+              defaultName="First" 
+              setFont={setFontFirst} 
+              setFontUrl={setFontFirstUrl}
+              updateFontName={updateFirstFontName}
+            />
+            <FontUploader 
+              defaultName="Second" 
+              setFont={setFontSecond} 
+              setFontUrl={setFontSecondUrl}
+              updateFontName={updateSecondFontName}
+            />
+          </div>
+          
+          {/* Dictionary selection section */}
+          <div className="mb-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Dictionary</label>
+                <button 
+                  onClick={() => setShowDictionaryInfo(!showDictionaryInfo)}
+                  className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                  aria-label="Dictionary info"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </div>
+              
+              <select 
+                value={dictionary} 
+                onChange={(e) => setDictionary(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md"
+              >
+                {Object.entries(DICTIONARY_OPTIONS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              
+              <p className="text-sm text-gray-500">
+                {getDictionary(dictionary).description}
+              </p>
+              
+              {dictionary === 'custom' && (
+                <div className="mt-2">
+                  <label className="text-sm font-medium">Custom Characters</label>
+                  <textarea
+                    className="w-full px-3 py-2 border rounded-md mt-1 font-mono"
+                    rows={3}
+                    value={customDictionary}
+                    onChange={(e) => setCustomDictionary(e.target.value)}
+                    placeholder="Enter the characters you want to include..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    These characters will be used to filter kerning pairs for comparison.
+                  </p>
+                </div>
+              )}
+              {showDictionaryInfo && (
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-2">
+                  <p className="text-xs text-blue-800 mb-2">
+                    Dictionaries define which character sets will be analyzed in the kerning comparison. 
+                    This set ({DICTIONARY_OPTIONS[dictionary]}) covers:
+                  </p>
+                  <div className="font-mono text-sm overflow-x-auto text-blue-800 whitespace-nowrap">
+                    {getDictionary(dictionary)?.characters || ''}
+                  </div>
+                </div>
+              )}
             </div>
-            
-            {/* Dictionary selection section */}
-            <div className="mb-5">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Dictionary</label>
+          </div>
+          
+          {/* Compare button */}
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={compareKerningTables}
+              disabled={!fontFirst || !fontSecond || isAnalyzing}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300"
+            >
+              {isAnalyzing ? 'Analyzing...' : 'Compare Kerning Tables'}
+            </button>
+          </div>
+        </div>
+        
+        {/* Analysis Tab Content */}
+        <div className="bg-white" style={{ display: activeTab === 'analysis' ? 'block' : 'none' }}>
+          {comparisonResults ? (
+            <>
+              <h2 className="text-lg font-bold mb-3 hidden">Analysis</h2>
+              <p className="text-gray-500 mb-5 max-w-prose">
+                This analysis is the result of comparing the  {fontFirst?.name || 'First'} ({fontFirst?.fileName || 'N/A'}) with {fontSecond?.name || 'Second'} ({fontSecond?.fileName || 'N/A'})
+                using the {DICTIONARY_OPTIONS[dictionary]} dictionary
+              </p>
+              
+              {/* Your existing analysis content */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+                <div className="bg-gray-50 rounded-md p-4 text-center">
+                  <p className="text-sm text-gray-500">Total Pairs</p>
+                  <p className="text-2xl font-bold">{comparisonResults.stats.totalPairs}</p>
+                </div>
+                <div className="bg-gray-50 rounded-md p-4 text-center">
+                  <p className="text-sm text-gray-500">Matches</p>
+                  <p className="text-2xl font-bold">{comparisonResults.stats.matchCount}</p>
+                </div>
+                <div className="bg-gray-50 rounded-md p-4 text-center">
+                  <p className="text-sm text-gray-500">Differences</p>
+                  <p className="text-2xl font-bold">{comparisonResults.stats.differenceCount}</p>
+                </div>
+                <div className="bg-gray-50 rounded-md p-4 text-center">
+                  <p className="text-sm text-gray-500">Only In One Font</p>
+                  <p className="text-2xl font-bold">
+                    {comparisonResults.stats.onlyInBeforeCount + comparisonResults.stats.onlyInAfterCount}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="mb-5">
+                <h3 className="text-md font-medium mb-2">Kerning Table Size</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <p className="text-sm text-gray-500">{fontFirst?.name || 'First'} Pairs</p>
+                    <div className="flex gap-2 items-center">
+                      <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
+                      {/* Add kerning data size estimate */}
+                      <p className="text-xs font-mono text-gray-500 mt-1">
+                        ~{Math.round(comparisonResults.stats.beforeTotal * 6 / 1024 * 10) / 10} KB
+                      </p>
+                    </div>
+                    <div className="mt-2 text-xs text-gray-500">
+                      {comparisonResults.kerningScope?.before.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                      {comparisonResults.kerningScope?.before.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                      {comparisonResults.kerningScope?.before.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                      {comparisonResults.kerningScope?.before.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                      {comparisonResults.kerningScope?.before.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                      {comparisonResults.kerningScope?.before.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                    </div>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <p className="text-sm text-gray-500">{fontSecond?.name || 'Second'} Pairs</p>
+                    <div className="flex gap-2 items-center">
+                      <p className="text-lg font-medium">{comparisonResults.stats.afterTotal}</p>
+                      {/* Add kerning data size estimate */}
+                      <p className="text-xs font-mono text-gray-500 mt-1">
+                        ~{Math.round(comparisonResults.stats.afterTotal * 6 / 1024 * 10) / 10} KB
+                      </p>
+                    </div>
+                    <div className="mt-2 text-xs text-gray-500">
+                      {comparisonResults.kerningScope?.after.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
+                      {comparisonResults.kerningScope?.after.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
+                      {comparisonResults.kerningScope?.after.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
+                      {comparisonResults.kerningScope?.after.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
+                      {comparisonResults.kerningScope?.after.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
+                      {comparisonResults.kerningScope?.after.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-md font-medium">Characters with the most kerning data</h3>
+                <button 
+                  onClick={() => setShowSpacingInfo(!showSpacingInfo)}
+                  className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                  aria-label="Spacing candidates info"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </div>
+
+              {showSpacingInfo && (
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                  <p className="text-sm text-blue-800">
+                    Characters that appear in many kerning pairs may be candidates for spacing adjustments instead of individual kerning pairs.
+                  </p>
+                </div>
+              )}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* First Font */}
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'}</h4>
+                    
+                    {comparisonResults.spacingCandidates.before.left.length === 0 && 
+                      comparisonResults.spacingCandidates.before.right.length === 0 ? (
+                      <p className="text-sm text-gray-500">No spacing candidates identified</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <h5 className="text-xs font-medium mb-2 text-gray-500">Left Characters</h5>
+                          <div className="space-y-1">
+                            {comparisonResults.spacingCandidates.before.left.map(({char, count}) => (
+                              <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                                <div className="font-mono text-lg">{char}</div>
+                                <div className="text-sm text-gray-500">{count} pairs</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-medium mb-2 text-gray-500">Right Characters</h5>
+                          <div className="space-y-1">
+                            {comparisonResults.spacingCandidates.before.right.map(({char, count}) => (
+                              <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                                <div className="font-mono text-lg">{char}</div>
+                                <div className="text-sm text-gray-500">{count} pairs</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+              
+                  {/* Second Font */}
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'}</h4>
+                    
+                    {comparisonResults.spacingCandidates.after.left.length === 0 && 
+                      comparisonResults.spacingCandidates.after.right.length === 0 ? (
+                      <p className="text-sm text-gray-500">No spacing candidates identified</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <h5 className="text-xs font-medium mb-2 text-gray-500">Left Characters</h5>
+                          <div className="space-y-1">
+                            {comparisonResults.spacingCandidates.after.left.map(({char, count}) => (
+                              <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                                <div className="font-mono text-lg">{char}</div>
+                                <div className="text-sm text-gray-500">{count} pairs</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-medium mb-2 text-gray-500">Right Characters</h5>
+                          <div className="space-y-1">
+                            {comparisonResults.spacingCandidates.after.right.map(({char, count}) => (
+                              <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                                <div className="font-mono text-lg">{char}</div>
+                                <div className="text-sm text-gray-500">{count} pairs</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Add this section after the Spacing Candidates section in the Analysis tab */}
+
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-md font-medium">Kerning Outliers</h3>
                   <button 
-                    onClick={() => setShowDictionaryInfo(!showDictionaryInfo)}
+                    onClick={() => setShowOutlierInfo(!showOutlierInfo)}
                     className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
-                    aria-label="Dictionary info"
                   >
                     <Info className="h-4 w-4" />
                   </button>
                 </div>
                 
-                <select 
-                  value={dictionary} 
-                  onChange={(e) => setDictionary(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md"
-                >
-                  {Object.entries(DICTIONARY_OPTIONS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-                
-                <p className="text-sm text-gray-500">
-                  {getDictionary(dictionary).description}
-                </p>
-                
-                {dictionary === 'custom' && (
-                  <div className="mt-2">
-                    <label className="text-sm font-medium">Custom Characters</label>
-                    <textarea
-                      className="w-full px-3 py-2 border rounded-md mt-1 font-mono"
-                      rows={3}
-                      value={customDictionary}
-                      onChange={(e) => setCustomDictionary(e.target.value)}
-                      placeholder="Enter the characters you want to include..."
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      These characters will be used to filter kerning pairs for comparison.
+                {showOutlierInfo && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                    <p className="text-sm text-blue-800">
+                      Outliers are kerning pairs with unusually large or small values compared to the font's average. They may indicate inconsistencies or potential errors.
                     </p>
                   </div>
                 )}
-                {showDictionaryInfo && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-2">
-                    <p className="text-xs text-blue-800 mb-2">
-                      Dictionaries define which character sets will be analyzed in the kerning comparison. 
-                      This set ({DICTIONARY_OPTIONS[dictionary]}) covers:
-                    </p>
-                    <div className="font-mono text-sm overflow-x-auto text-blue-800 whitespace-nowrap">
-                      {getDictionary(dictionary)?.characters || ''}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* First Font Outliers */}
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Outliers</h4>
+                    
+                    <div className="space-y-3">
+                      <h5 className="text-xs font-medium text-gray-500">Largest Negative Values</h5>
+                      <div className="space-y-1 max-h-36 overflow-y-auto">
+                        {getOutliers(comparisonResults.comparisons, 'before', 'negative').map((pair, idx) => (
+                          <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{pair.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'FirstFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {pair.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono text-red-500">{pair.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <h5 className="text-xs font-medium text-gray-500">Largest Positive Values</h5>
+                      <div className="space-y-1 max-h-36 overflow-y-auto">
+                        {getOutliers(comparisonResults.comparisons, 'before', 'positive').map((pair, idx) => (
+                          <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{pair.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'FirstFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {pair.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono text-green-500">+{pair.value}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  </div>
+                  
+                  {/* Second Font Outliers */}
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Outliers</h4>
+                    
+                    <div className="space-y-3">
+                      <h5 className="text-xs font-medium text-gray-500">Largest Negative Values</h5>
+                      <div className="space-y-1 max-h-36 overflow-y-auto">
+                        {getOutliers(comparisonResults.comparisons, 'after', 'negative').map((pair, idx) => (
+                          <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{pair.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'SecondFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {pair.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono text-red-500">{pair.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <h5 className="text-xs font-medium text-gray-500">Largest Positive Values</h5>
+                      <div className="space-y-1 max-h-36 overflow-y-auto">
+                        {getOutliers(comparisonResults.comparisons, 'after', 'positive').map((pair, idx) => (
+                          <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{pair.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'SecondFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {pair.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono text-green-500">+{pair.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-md font-medium">Symmetry Analysis</h3>
+                  <button 
+                    onClick={() => setShowSymmetryInfo(!showSymmetryInfo)}
+                    className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </div>
+                
+                {showSymmetryInfo && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                    <p className="text-sm text-blue-800">
+                      This analysis identifies asymmetries in kerning, where a pair (like "AV") and its reverse ("VA") have significantly different values. Some asymmetry is expected, but large differences may need review.
+                    </p>
                   </div>
                 )}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Asymmetries</h4>
+                    
+                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                      {getAsymmetricPairs(comparisonResults.comparisons, 'before').map((asymmetry, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded border border-gray-100">
+                          <div className="flex justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{asymmetry.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'FirstFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {asymmetry.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono">{asymmetry.value}</div>
+                          </div>
+                          <div className="flex justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{asymmetry.reversePair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'FirstFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {asymmetry.reversePair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono">{asymmetry.reverseValue}</div>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">Difference: {Math.abs(asymmetry.value - asymmetry.reverseValue)}</div>
+                        </div>
+                      ))}
+                      
+                      {getAsymmetricPairs(comparisonResults.comparisons, 'before').length === 0 && (
+                        <p className="text-sm text-gray-500">No significant asymmetries found</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Asymmetries</h4>
+                    
+                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                      {getAsymmetricPairs(comparisonResults.comparisons, 'after').map((asymmetry, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded border border-gray-100">
+                          <div className="flex justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{asymmetry.pair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'SecondFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {asymmetry.pair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono">{asymmetry.value}</div>
+                          </div>
+                          <div className="flex justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono">{asymmetry.reversePair}</div>
+                              <div 
+                                style={{ 
+                                  fontFamily: 'SecondFontPreview', 
+                                  fontSize: '18px',
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                              >
+                                {asymmetry.reversePair}
+                              </div>
+                            </div>
+                            <div className="text-sm font-mono">{asymmetry.reverseValue}</div>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">Difference: {Math.abs(asymmetry.value - asymmetry.reverseValue)}</div>
+                        </div>
+                      ))}
+                      
+                      {getAsymmetricPairs(comparisonResults.comparisons, 'after').length === 0 && (
+                        <p className="text-sm text-gray-500">No significant asymmetries found</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            
-            {/* Compare button */}
-            <div className="flex items-center justify-between">
-              <button 
-                onClick={compareKerningTables}
-                disabled={!fontFirst || !fontSecond || isAnalyzing}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300"
-              >
-                {isAnalyzing ? 'Analyzing...' : 'Compare Kerning Tables'}
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {/* Analysis Tab Content */}
-        {activeTab === 'analysis' && comparisonResults && (
-          <div className="bg-white">
-            <h2 className="text-lg font-bold mb-3 hidden">Analysis</h2>
-            <p className="text-gray-500 mb-5 max-w-prose">
-              This analysis is the result of comparing the  {fontFirst?.name || 'First'} ({fontFirst?.fileName || 'N/A'}) with {fontSecond?.name || 'Second'} ({fontSecond?.fileName || 'N/A'})
-              using the {DICTIONARY_OPTIONS[dictionary]} dictionary
-            </p>
-            
-            {/* Your existing analysis content */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
-              <div className="bg-gray-50 rounded-md p-4 text-center">
-                <p className="text-sm text-gray-500">Total Pairs</p>
-                <p className="text-2xl font-bold">{comparisonResults.stats.totalPairs}</p>
-              </div>
-              <div className="bg-gray-50 rounded-md p-4 text-center">
-                <p className="text-sm text-gray-500">Matches</p>
-                <p className="text-2xl font-bold">{comparisonResults.stats.matchCount}</p>
-              </div>
-              <div className="bg-gray-50 rounded-md p-4 text-center">
-                <p className="text-sm text-gray-500">Differences</p>
-                <p className="text-2xl font-bold">{comparisonResults.stats.differenceCount}</p>
-              </div>
-              <div className="bg-gray-50 rounded-md p-4 text-center">
-                <p className="text-sm text-gray-500">Only In One Font</p>
-                <p className="text-2xl font-bold">
-                  {comparisonResults.stats.onlyInBeforeCount + comparisonResults.stats.onlyInAfterCount}
-                </p>
-              </div>
-            </div>
-            
-            <div className="mb-5">
-              <h3 className="text-md font-medium mb-2">Kerning Table Size</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-md p-4">
-                  <p className="text-sm text-gray-500">{fontFirst?.name || 'First'} Pairs</p>
-                  <div className="flex gap-2 items-center">
-                    <p className="text-lg font-medium">{comparisonResults.stats.beforeTotal}</p>
-                    {/* Add kerning data size estimate */}
-                    <p className="text-xs font-mono text-gray-500 mt-1">
-                      ~{Math.round(comparisonResults.stats.beforeTotal * 6 / 1024 * 10) / 10} KB
+              
+              {/* Add this section after the Symmetry Analysis section */}
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-md font-medium">Pattern Consistency</h3>
+                  <button 
+                    onClick={() => setShowPatternInfo(!showPatternInfo)}
+                    className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </div>
+                
+                {showPatternInfo && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                    <p className="text-sm text-blue-800">
+                      This analysis identifies groups of similar character pairs that should have consistent kerning relationships but don't. For example, "AV", "AW", and "AY" might be expected to have similar kerning values.
                     </p>
                   </div>
-                  <div className="mt-2 text-xs text-gray-500">
-                    {comparisonResults.kerningScope?.before.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
-                    {comparisonResults.kerningScope?.before.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
-                    {comparisonResults.kerningScope?.before.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
-                    {comparisonResults.kerningScope?.before.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
-                    {comparisonResults.kerningScope?.before.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
-                    {comparisonResults.kerningScope?.before.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
-                  </div>
-                </div>
-                <div className="bg-gray-50 rounded-md p-4">
-                  <p className="text-sm text-gray-500">{fontSecond?.name || 'Second'} Pairs</p>
-                  <div className="flex gap-2 items-center">
-                    <p className="text-lg font-medium">{comparisonResults.stats.afterTotal}</p>
-                    {/* Add kerning data size estimate */}
-                    <p className="text-xs font-mono text-gray-500 mt-1">
-                      ~{Math.round(comparisonResults.stats.afterTotal * 6 / 1024 * 10) / 10} KB
-                    </p>
-                  </div>
-                  <div className="mt-2 text-xs text-gray-500">
-                    {comparisonResults.kerningScope?.after.uppercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Uppercase</span>}
-                    {comparisonResults.kerningScope?.after.lowercase && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Lowercase</span>}
-                    {comparisonResults.kerningScope?.after.numbers && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Numbers</span>}
-                    {comparisonResults.kerningScope?.after.punctuation && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Punctuation</span>}
-                    {comparisonResults.kerningScope?.after.accented && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Accented</span>}
-                    {comparisonResults.kerningScope?.after.nonLatin && <span className="inline-block px-2 py-1 mr-1 mb-1 bg-blue-50 rounded">Non-Latin</span>}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-md font-medium">Spacing Candidates</h3>
-              <button 
-                onClick={() => setShowSpacingInfo(!showSpacingInfo)}
-                className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
-                aria-label="Spacing candidates info"
-              >
-                <Info className="h-4 w-4" />
-              </button>
-            </div>
-
-            {showSpacingInfo && (
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                <p className="text-sm text-blue-800">
-                  Characters that appear in many kerning pairs may be candidates for spacing adjustments instead of individual kerning pairs.
-                </p>
-              </div>
-            )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* First Font */}
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'}</h4>
-                  
-                  {comparisonResults.spacingCandidates.before.left.length === 0 && 
-                    comparisonResults.spacingCandidates.before.right.length === 0 ? (
-                    <p className="text-sm text-gray-500">No spacing candidates identified</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <h5 className="text-xs font-medium mb-2 text-gray-500">Left Characters</h5>
-                        <div className="space-y-1">
-                          {comparisonResults.spacingCandidates.before.left.map(({char, count}) => (
-                            <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                              <div className="font-mono text-lg">{char}</div>
-                              <div className="text-sm text-gray-500">{count} pairs</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <h5 className="text-xs font-medium mb-2 text-gray-500">Right Characters</h5>
-                        <div className="space-y-1">
-                          {comparisonResults.spacingCandidates.before.right.map(({char, count}) => (
-                            <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                              <div className="font-mono text-lg">{char}</div>
-                              <div className="text-sm text-gray-500">{count} pairs</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-            
-                {/* Second Font */}
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'}</h4>
-                  
-                  {comparisonResults.spacingCandidates.after.left.length === 0 && 
-                    comparisonResults.spacingCandidates.after.right.length === 0 ? (
-                    <p className="text-sm text-gray-500">No spacing candidates identified</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <h5 className="text-xs font-medium mb-2 text-gray-500">Left Characters</h5>
-                        <div className="space-y-1">
-                          {comparisonResults.spacingCandidates.after.left.map(({char, count}) => (
-                            <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                              <div className="font-mono text-lg">{char}</div>
-                              <div className="text-sm text-gray-500">{count} pairs</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <h5 className="text-xs font-medium mb-2 text-gray-500">Right Characters</h5>
-                        <div className="space-y-1">
-                          {comparisonResults.spacingCandidates.after.right.map(({char, count}) => (
-                            <div key={char} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                              <div className="font-mono text-lg">{char}</div>
-                              <div className="text-sm text-gray-500">{count} pairs</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            
-            {/* Add this section after the Spacing Candidates section in the Analysis tab */}
-
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-md font-medium">Kerning Outliers</h3>
-                <button 
-                  onClick={() => setShowOutlierInfo(!showOutlierInfo)}
-                  className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </div>
-              
-              {showOutlierInfo && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                  <p className="text-sm text-blue-800">
-                    Outliers are kerning pairs with unusually large or small values compared to the font's average. They may indicate inconsistencies or potential errors.
-                  </p>
-                </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* First Font Outliers */}
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Outliers</h4>
-                  
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-500">Largest Negative Values</h5>
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {getOutliers(comparisonResults.comparisons, 'before', 'negative').map((pair, idx) => (
-                        <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{pair.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'FirstFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {pair.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono text-red-500">{pair.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <h5 className="text-xs font-medium text-gray-500">Largest Positive Values</h5>
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {getOutliers(comparisonResults.comparisons, 'before', 'positive').map((pair, idx) => (
-                        <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{pair.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'FirstFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {pair.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono text-green-500">+{pair.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                )}
                 
-                {/* Second Font Outliers */}
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Outliers</h4>
-                  
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-500">Largest Negative Values</h5>
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {getOutliers(comparisonResults.comparisons, 'after', 'negative').map((pair, idx) => (
-                        <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{pair.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'SecondFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {pair.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono text-red-500">{pair.value}</div>
-                        </div>
-                      ))}
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Inconsistencies</h4>
                     
-                    <h5 className="text-xs font-medium text-gray-500">Largest Positive Values</h5>
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {getOutliers(comparisonResults.comparisons, 'after', 'positive').map((pair, idx) => (
-                        <div key={idx} className="flex justify-between p-2 bg-white rounded border border-gray-100">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{pair.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'SecondFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {pair.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono text-green-500">+{pair.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-md font-medium">Symmetry Analysis</h3>
-                <button 
-                  onClick={() => setShowSymmetryInfo(!showSymmetryInfo)}
-                  className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </div>
-              
-              {showSymmetryInfo && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                  <p className="text-sm text-blue-800">
-                    This analysis identifies asymmetries in kerning, where a pair (like "AV") and its reverse ("VA") have significantly different values. Some asymmetry is expected, but large differences may need review.
-                  </p>
-                </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Asymmetries</h4>
-                  
-                  <div className="space-y-1 max-h-60 overflow-y-auto">
-                    {getAsymmetricPairs(comparisonResults.comparisons, 'before').map((asymmetry, idx) => (
-                      <div key={idx} className="p-2 bg-white rounded border border-gray-100">
-                        <div className="flex justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{asymmetry.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'FirstFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {asymmetry.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono">{asymmetry.value}</div>
-                        </div>
-                        <div className="flex justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{asymmetry.reversePair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'FirstFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {asymmetry.reversePair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono">{asymmetry.reverseValue}</div>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">Difference: {Math.abs(asymmetry.value - asymmetry.reverseValue)}</div>
-                      </div>
-                    ))}
-                    
-                    {getAsymmetricPairs(comparisonResults.comparisons, 'before').length === 0 && (
-                      <p className="text-sm text-gray-500">No significant asymmetries found</p>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Asymmetries</h4>
-                  
-                  <div className="space-y-1 max-h-60 overflow-y-auto">
-                    {getAsymmetricPairs(comparisonResults.comparisons, 'after').map((asymmetry, idx) => (
-                      <div key={idx} className="p-2 bg-white rounded border border-gray-100">
-                        <div className="flex justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{asymmetry.pair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'SecondFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {asymmetry.pair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono">{asymmetry.value}</div>
-                        </div>
-                        <div className="flex justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono">{asymmetry.reversePair}</div>
-                            <div 
-                              style={{ 
-                                fontFamily: 'SecondFontPreview', 
-                                fontSize: '18px',
-                                textRendering: 'optimizeLegibility'
-                              }}
-                            >
-                              {asymmetry.reversePair}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono">{asymmetry.reverseValue}</div>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">Difference: {Math.abs(asymmetry.value - asymmetry.reverseValue)}</div>
-                      </div>
-                    ))}
-                    
-                    {getAsymmetricPairs(comparisonResults.comparisons, 'after').length === 0 && (
-                      <p className="text-sm text-gray-500">No significant asymmetries found</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Add this section after the Symmetry Analysis section */}
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-md font-medium">Pattern Consistency</h3>
-                <button 
-                  onClick={() => setShowPatternInfo(!showPatternInfo)}
-                  className="p-1 rounded-md text-gray-500 hover:bg-gray-100"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </div>
-              
-              {showPatternInfo && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                  <p className="text-sm text-blue-800">
-                    This analysis identifies groups of similar character pairs that should have consistent kerning relationships but don't. For example, "AV", "AW", and "AY" might be expected to have similar kerning values.
-                  </p>
-                </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontFirst?.name || 'First Font'} Inconsistencies</h4>
-                  
-                  <div className="space-y-1 max-h-72 overflow-y-auto">
-                    {getInconsistentPatterns(comparisonResults.comparisons, 'before').map((group, idx) => (
-                      <div key={idx} className="p-2 bg-white rounded border border-gray-100">
-                        <div className="text-xs font-medium mb-1">Group with "{group.left}" on left</div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {group.pairs.map((pair, pairIdx) => (
-                            <div key={pairIdx} className="flex justify-between items-center">
-                              <div className="flex items-center gap-2">
-                                <div className="font-mono text-sm">{pair.pair}</div>
-                                <div 
-                                  style={{ 
-                                    fontFamily: 'FirstFontPreview', 
-                                    fontSize: '16px',
-                                    textRendering: 'optimizeLegibility'
-                                  }}
-                                >
-                                  {pair.pair}
+                    <div className="space-y-1 max-h-72 overflow-y-auto">
+                      {getInconsistentPatterns(comparisonResults.comparisons, 'before').map((group, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded border border-gray-100">
+                          <div className="text-xs font-medium mb-1">Group with "{group.left}" on left</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {group.pairs.map((pair, pairIdx) => (
+                              <div key={pairIdx} className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                  <div className="font-mono text-sm">{pair.pair}</div>
+                                  <div 
+                                    style={{ 
+                                      fontFamily: 'FirstFontPreview', 
+                                      fontSize: '16px',
+                                      textRendering: 'optimizeLegibility'
+                                    }}
+                                  >
+                                    {pair.pair}
+                                  </div>
                                 </div>
+                                <div className="text-sm font-mono">{pair.value}</div>
                               </div>
-                              <div className="text-sm font-mono">{pair.value}</div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Variance: {group.variance.toFixed(1)} units
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Variance: {group.variance.toFixed(1)} units
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {getInconsistentPatterns(comparisonResults.comparisons, 'before').length === 0 && (
-                      <p className="text-sm text-gray-500">No significant inconsistencies found</p>
-                    )}
+                      ))}
+                      
+                      {getInconsistentPatterns(comparisonResults.comparisons, 'before').length === 0 && (
+                        <p className="text-sm text-gray-500">No significant inconsistencies found</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-                
-                <div className="bg-gray-50 rounded-md p-4">
-                  <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Inconsistencies</h4>
                   
-                  <div className="space-y-1 max-h-72 overflow-y-auto">
-                    {getInconsistentPatterns(comparisonResults.comparisons, 'after').map((group, idx) => (
-                      <div key={idx} className="p-2 bg-white rounded border border-gray-100">
-                        <div className="text-xs font-medium mb-1">Group with "{group.left}" on left</div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {group.pairs.map((pair, pairIdx) => (
-                            <div key={pairIdx} className="flex justify-between items-center">
-                              <div className="flex items-center gap-2">
-                                <div className="font-mono text-sm">{pair.pair}</div>
-                                <div 
-                                  style={{ 
-                                    fontFamily: 'SecondFontPreview', 
-                                    fontSize: '16px',
-                                    textRendering: 'optimizeLegibility'
-                                  }}
-                                >
-                                  {pair.pair}
-                                </div>
-                              </div>
-                              <div className="text-sm font-mono">{pair.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Variance: {group.variance.toFixed(1)} units
-                        </div>
-                      </div>
-                    ))}
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <h4 className="text-sm font-medium mb-3">{fontSecond?.name || 'Second Font'} Inconsistencies</h4>
                     
-                    {getInconsistentPatterns(comparisonResults.comparisons, 'after').length === 0 && (
-                      <p className="text-sm text-gray-500">No significant inconsistencies found</p>
-                    )}
+                    <div className="space-y-1 max-h-72 overflow-y-auto">
+                      {getInconsistentPatterns(comparisonResults.comparisons, 'after').map((group, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded border border-gray-100">
+                          <div className="text-xs font-medium mb-1">Group with "{group.left}" on left</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {group.pairs.map((pair, pairIdx) => (
+                              <div key={pairIdx} className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                  <div className="font-mono text-sm">{pair.pair}</div>
+                                  <div 
+                                    style={{ 
+                                      fontFamily: 'SecondFontPreview', 
+                                      fontSize: '16px',
+                                      textRendering: 'optimizeLegibility'
+                                    }}
+                                  >
+                                    {pair.pair}
+                                  </div>
+                                </div>
+                                <div className="text-sm font-mono">{pair.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Variance: {group.variance.toFixed(1)} units
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {getInconsistentPatterns(comparisonResults.comparisons, 'after').length === 0 && (
+                        <p className="text-sm text-gray-500">No significant inconsistencies found</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-500">No comparison results available. Please go to Settings tab and run a comparison first.</p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         
         {/* Side-by-Side Comparison Tab Content */}
-        {activeTab === 'comparison' && comparisonResults && (
-          <div className="bg-white">
-            <h2 className="text-lg font-bold mb-3 hidden">Side-by-Side Comparison</h2>
-            <p className="text-gray-500 mb-5 hidden">
-              Visual comparison of kerning pairs between fonts
-            </p>
-            
-            {/* Add font size controls */}
-            <div className="flex justify-between items-center mb-5 gap-4">
-                          {/* Add pair search filter */}
-              <div className="relative flex-grow">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <input
-                  type="text"
-                  placeholder="Filter kerning pairs..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border rounded-md"
-                />
-              </div>
+        <div className="bg-white" style={{ display: activeTab === 'comparison' ? 'block' : 'none' }}>
+          {comparisonResults ? (
+            <>
+              <h2 className="text-lg font-bold mb-3 hidden">Side-by-Side Comparison</h2>
+              <p className="text-gray-500 mb-5 hidden">
+                Visual comparison of kerning pairs between fonts
+              </p>
               
-              {/* Add discrepancy filter slider */}
-              <div className="flex items-center gap-2 max-w-1/3">
-                <label className="text-sm font-medium whitespace-nowrap">Round:</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={discrepancyUnits}
-                  onChange={(e) => setDiscrepancyUnits(parseInt(e.target.value))}
-                  className="w-32 md:w-40"
-                />
-                <span className="text-sm text-gray-500">{discrepancyUnits}</span>
-                <div className="relative group ml-1">
-                  <span className="cursor-help text-gray-400">ⓘ</span>
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-60 p-2 bg-white border rounded shadow-lg text-sm text-gray-600 hidden group-hover:block z-10">
-                    Kerning pairs with a difference within this range will be considered a match
+              {/* Add font size controls */}
+              <div className="flex justify-between items-center mb-5 gap-4">
+                            {/* Add pair search filter */}
+                <div className="relative flex-grow">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <input
+                    type="text"
+                    placeholder="Filter kerning pairs..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 border rounded-md"
+                  />
+                </div>
+                
+                {/* Add discrepancy filter slider */}
+                <div className="flex items-center gap-2 max-w-1/3">
+                  <label className="text-sm font-medium whitespace-nowrap">Round:</label>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="100" 
+                    value={discrepancyUnits}
+                    onChange={(e) => setDiscrepancyUnits(parseInt(e.target.value))}
+                    className="w-32 md:w-40"
+                  />
+                  <span className="text-sm text-gray-500">{discrepancyUnits}</span>
+                  <div className="relative group ml-1">
+                    <span className="cursor-help text-gray-400">ⓘ</span>
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-60 p-2 bg-white border rounded shadow-lg text-sm text-gray-600 hidden group-hover:block z-10">
+                      Kerning pairs with a difference within this range will be considered a match
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-            
-            {/* Filter options */}
-            <div className="flex flex-wrap justify-between items-center mb-5 gap-3">
-              <div>
-                <div className="inline-flex rounded-md shadow-sm mb-3" role="group">
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilter('all')}
-                    className={`px-4 py-2 text-sm font-medium rounded-l-lg border ${
-                      activeFilter === 'all' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-300' 
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    All ({comparisonResults.comparisons.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilter('different')}
-                    className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
-                      activeFilter === 'different' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-300' 
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    Different ({comparisonResults.stats.differenceCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilter('only-before')}
-                    className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
-                      activeFilter === 'only-before' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-300' 
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    Only in {fontFirst?.name || 'First Font'} ({comparisonResults.stats.onlyInBeforeCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilter('only-after')}
-                    className={`px-4 py-2 text-sm font-medium border-t border-b ${
-                      activeFilter === 'only-after' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-300' 
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    Only in {fontSecond?.name || 'Second Font'} ({comparisonResults.stats.onlyInAfterCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilter('match')}
-                    className={`px-4 py-2 text-sm font-medium rounded-r-lg border ${
-                      activeFilter === 'match' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-300' 
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    Matching ({comparisonResults.stats.matchCount})
-                  </button>
-                </div>
-              </div>
-            </div>
-            
-            <div className="border rounded-md overflow-x-auto overflow-y-auto max-h-[calc(90vh-250px)]">
-              <table className="min-w-full divide-y divide-gray-200 position-relative">
-                <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
-                  <tr>
-                    <th className="flex items-center px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      <span className="hidden">Pair</span>
-                      <span className="flex items-center gap-1">
-                      <button 
-                        onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
-                        className="p-1 rounded-md hover:bg-gray-60"
-                        aria-label="Decrease size"
-                      >
-                        <MinusCircleIcon className="h-3 w-3" />
-                      </button>
-                      <span className="text-xs">{previewSize}px</span>
-                      <button 
-                        onClick={() => setPreviewSize(Math.min(72, previewSize + 4))}
-                        className="p-1 rounded-md hover:bg-gray-70"
-                        aria-label="Increase size"
-                      >
-                        <PlusCircleIcon className="h-3 w-3" />
-                      </button>
-                    </span>
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontFirst?.name || 'First'}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontSecond?.name || 'Second'}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Difference</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {getFilteredComparisons().filter(comp => 
-                    comp.pair.toLowerCase().includes(searchTerm.toLowerCase())
-                  ).map((comp, idx) => (
-                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="font-mono">{comp.left},{comp.right}</div>
-                          {/* Visual preview of the pair */}
-                          <div className="flex space-x-4">
-                            <span 
-                              style={{ 
-                                fontFamily: 'FirstFontPreview', 
-                                fontSize: `${previewSize}px`,
-                                textRendering: 'optimizeLegibility'
-                              }}
-                              className="text-gray-700"
-                            >
-                              {comp.pair}
-                            </span>
-                            <span 
-                              style={{ 
-                                fontFamily: 'SecondFontPreview', 
-                                fontSize: `${previewSize}px`,
-                                textRendering: 'optimizeLegibility'
-                              }}
-                              className="text-gray-700"
-                            >
-                              {comp.pair}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {comp.beforeValue !== null ? comp.beforeValue : '—'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {comp.afterValue !== null ? comp.afterValue : '—'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {comp.status === 'different' ? (
-                          <span className={comp.difference > 0 ? 'text-green-600' : 'text-red-600'}>
-                            {comp.difference > 0 ? '+' : ''}{comp.difference}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        {comp.status === 'match' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            <Check className="h-3 w-3 mr-1" /> Match
-                          </span>
-                        )}
-                        {comp.status === 'different' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                            <AlertTriangle className="h-3 w-3 mr-1" /> Different
-                          </span>
-                        )}
-                        {comp.status === 'only-before' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            Only in {fontFirst?.name || 'First Font'}
-                          </span>
-                        )}
-                        {comp.status === 'only-after' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                            Only in {fontSecond?.name || 'Second Font'}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Overlay Tab Content */}
-        {activeTab === 'overlay' && comparisonResults && (
-          <div className="bg-white">
-            <h2 className="text-lg font-bold mb-3 hidden">Kerning Overlay Comparison</h2>
-            
-            {/* Get the current pair to display */}
-            {(() => {
-              const filteredPairs = getFilteredComparisons().filter(comp => 
-                comp.pair.toLowerCase().includes(searchTerm.toLowerCase())
-              );
               
-              if (filteredPairs.length === 0) {
-                return (
-                  <div className="flex flex-col items-center justify-center py-12">
-                    <p className="text-gray-500">No pairs match your current filters.</p>
+              {/* Filter options */}
+              <div className="flex flex-wrap justify-between items-center mb-5 gap-3">
+                <div>
+                  <div className="inline-flex rounded-md shadow-sm mb-3" role="group">
                     <button
-                      onClick={() => {
-                        setActiveFilter('all');
-                        setSearchTerm('');
-                      }}
-                      className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+                      type="button"
+                      onClick={() => setActiveFilter('all')}
+                      className={`px-4 py-2 text-sm font-medium rounded-l-lg border ${
+                        activeFilter === 'all' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-300' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
                     >
-                      Reset filters
+                      All ({comparisonResults.comparisons.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('different')}
+                      className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
+                        activeFilter === 'different' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-300' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Different ({comparisonResults.stats.differenceCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('only-before')}
+                      className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
+                        activeFilter === 'only-before' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-300' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Only in {fontFirst?.name || 'First Font'} ({comparisonResults.stats.onlyInBeforeCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('only-after')}
+                      className={`px-4 py-2 text-sm font-medium border-t border-b ${
+                        activeFilter === 'only-after' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-300' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Only in {fontSecond?.name || 'Second Font'} ({comparisonResults.stats.onlyInAfterCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter('match')}
+                      className={`px-4 py-2 text-sm font-medium rounded-r-lg border ${
+                        activeFilter === 'match' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-300' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Matching ({comparisonResults.stats.matchCount})
                     </button>
                   </div>
-                );
-              }
+                </div>
+              </div>
               
-              // Ensure current index is valid
-              if (currentPairIndex >= filteredPairs.length) {
-                setCurrentPairIndex(0);
-              }
-              
-              const currentPair = filteredPairs[currentPairIndex];
-              
-              return (
-                <>                  
-                  {/* Large overlay display */}
-                  <div className="relative border rounded-lg overflow-hidden bg-gray-50 p-10 flex items-center justify-center mb-4 h-[calc(70vh-200px)] min-h-[400px]">
-                    {/* Font size control */}
-                    <div className="flex items-center gap-2 mb-4 absolute top-4 right-4">
-                      <label className="text-sm font-medium hidden">Size:</label>
-                      <button 
-                        onClick={() => setOverlaySize(Math.max(36, overlaySize - 12))}
-                        className="p-1 rounded-md border hover:bg-gray-50"
-                        aria-label="Decrease size"
-                      >
-                        <MinusCircleIcon className="h-4 w-4" />
-                      </button>
-                      <span className="text-sm font-medium">{overlaySize}px</span>
-                      <button 
-                        onClick={() => setOverlaySize(Math.min(400, overlaySize + 12))}
-                        className="p-1 rounded-md border hover:bg-gray-50"
-                        aria-label="Increase size"
-                      >
-                        <PlusCircleIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-                    {/* Values display */}
-                    <div className="flex gap-8 mb-4 text-sm absolute top-4 left-4">
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 bg-blue-500 opacity-60 mr-1"></div>
-                        <span className="font-medium">{fontFirst?.name || 'First Font'}: </span>
-                        <span className="font-mono">{currentPair.beforeValue !== null ? currentPair.beforeValue : '—'}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 bg-red-500 opacity-60 mr-1"></div>
-                        <span className="font-medium">{fontSecond?.name || 'Second Font'}: </span>
-                        <span className="font-mono">{currentPair.afterValue !== null ? currentPair.afterValue : '—'}</span>
-                      </div>
-                    </div>
+              <div className="border rounded-md overflow-x-auto overflow-y-auto max-h-[calc(90vh-250px)]">
+                <table className="min-w-full divide-y divide-gray-200 position-relative">
+                  <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
+                    <tr>
+                      <th className="flex items-center px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <span className="hidden">Pair</span>
+                        <span className="flex items-center gap-1">
+                        <button 
+                          onClick={() => setPreviewSize(Math.max(12, previewSize - 4))}
+                          className="p-1 rounded-md hover:bg-gray-60"
+                          aria-label="Decrease size"
+                        >
+                          <MinusCircleIcon className="h-3 w-3" />
+                        </button>
+                        <span className="text-xs">{previewSize}px</span>
+                        <button 
+                          onClick={() => setPreviewSize(Math.min(72, previewSize + 4))}
+                          className="p-1 rounded-md hover:bg-gray-70"
+                          aria-label="Increase size"
+                        >
+                          <PlusCircleIcon className="h-3 w-3" />
+                        </button>
+                      </span>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontFirst?.name || 'First'}</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{fontSecond?.name || 'Second'}</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Difference</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {getFilteredComparisons().filter(comp => 
+                      comp.pair.toLowerCase().includes(searchTerm.toLowerCase())
+                    ).map((comp, idx) => (
+                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="font-mono">{comp.left},{comp.right}</div>
+                            {/* Visual preview of the pair */}
+                            <div className="flex space-x-4">
+                              <span 
+                                style={{ 
+                                  fontFamily: 'FirstFontPreview', 
+                                  fontSize: `${previewSize}px`,
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                                className="text-gray-700"
+                              >
+                                {comp.pair}
+                              </span>
+                              <span 
+                                style={{ 
+                                  fontFamily: 'SecondFontPreview', 
+                                  fontSize: `${previewSize}px`,
+                                  textRendering: 'optimizeLegibility'
+                                }}
+                                className="text-gray-700"
+                              >
+                                {comp.pair}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {comp.beforeValue !== null ? comp.beforeValue : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {comp.afterValue !== null ? comp.afterValue : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {comp.status === 'different' ? (
+                            <span className={comp.difference > 0 ? 'text-green-600' : 'text-red-600'}>
+                              {comp.difference > 0 ? '+' : ''}{comp.difference}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {comp.status === 'match' && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              <Check className="h-3 w-3 mr-1" /> Match
+                            </span>
+                          )}
+                          {comp.status === 'different' && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                              <AlertTriangle className="h-3 w-3 mr-1" /> Different
+                            </span>
+                          )}
+                          {comp.status === 'only-before' && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Only in {fontFirst?.name || 'First Font'}
+                            </span>
+                          )}
+                          {comp.status === 'only-after' && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                              Only in {fontSecond?.name || 'Second Font'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-500">No comparison results available. Please go to Settings tab and run a comparison first.</p>
+            </div>
+          )}
+        </div>
 
-                    {/* First font */}
-                    <div className="absolute">
-                      <span
-                        style={{
-                          fontFamily: 'FirstFontPreview',
-                          fontSize: `${overlaySize}px`,
-                          color: 'rgba(0, 0, 255, 0.6)', // Semi-transparent blue
-                          textRendering: 'optimizeLegibility',
+        {/* Overlay Tab Content */}
+        <div className="bg-white" style={{ display: activeTab === 'overlay' ? 'block' : 'none' }}>
+          {comparisonResults ? (
+            <>
+              <h2 className="text-lg font-bold mb-3 hidden">Kerning Overlay Comparison</h2>
+              
+              {/* Get the current pair to display */}
+              {(() => {
+                const filteredPairs = getFilteredComparisons().filter(comp => 
+                  comp.pair.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+                
+                if (filteredPairs.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <p className="text-gray-500">No pairs match your current filters.</p>
+                      <button
+                        onClick={() => {
+                          setActiveFilter('all');
+                          setSearchTerm('');
                         }}
+                        className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
                       >
-                        {currentPair.pair}
-                      </span>
+                        Reset filters
+                      </button>
                     </div>
-                    
-                    {/* Second font */}
-                    <div className="absolute">
-                      <span
-                        style={{
-                          fontFamily: 'SecondFontPreview',
-                          fontSize: `${overlaySize}px`,
-                          color: 'rgba(255, 0, 0, 0.6)', // Semi-transparent red
-                          textRendering: 'optimizeLegibility',
-                        }}
-                      >
-                        {currentPair.pair}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex justify-between gap-4 mt-6">
-                    {/* Pair info header */}
-                    <div className="flex justify-between items-center gap-4 mb-4">
-                      <div>
-                        <span className="font-mono text-lg">{currentPair.left},{currentPair.right}</span>
-                        <span className="ml-4 text-gray-500">
-                          Pair {currentPairIndex + 1} of {filteredPairs.length}
+                  );
+                }
+                
+                // Ensure current index is valid
+                if (currentPairIndex >= filteredPairs.length) {
+                  setCurrentPairIndex(0);
+                }
+                
+                const currentPair = filteredPairs[currentPairIndex];
+                
+                return (
+                  <>                  
+                    {/* Large overlay display */}
+                    <div className="relative border rounded-lg overflow-hidden bg-gray-50 p-10 flex items-center justify-center mb-4 h-[calc(70vh-200px)] min-h-[400px]">
+                      {/* Font size control */}
+                      <div className="flex items-center gap-2 mb-4 absolute top-4 right-4">
+                        <label className="text-sm font-medium hidden">Size:</label>
+                        <button 
+                          onClick={() => setOverlaySize(Math.max(36, overlaySize - 12))}
+                          className="p-1 rounded-md border hover:bg-gray-50"
+                          aria-label="Decrease size"
+                        >
+                          <MinusCircleIcon className="h-4 w-4" />
+                        </button>
+                        <span className="text-sm font-medium">{overlaySize}px</span>
+                        <button 
+                          onClick={() => setOverlaySize(Math.min(400, overlaySize + 12))}
+                          className="p-1 rounded-md border hover:bg-gray-50"
+                          aria-label="Increase size"
+                        >
+                          <PlusCircleIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {/* Values display */}
+                      <div className="flex gap-8 mb-4 text-sm absolute top-4 left-4">
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 bg-blue-500 opacity-60 mr-1"></div>
+                          <span className="font-medium">{fontFirst?.name || 'First Font'}: </span>
+                          <span className="font-mono">{currentPair.beforeValue !== null ? currentPair.beforeValue : '—'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 bg-red-500 opacity-60 mr-1"></div>
+                          <span className="font-medium">{fontSecond?.name || 'Second Font'}: </span>
+                          <span className="font-mono">{currentPair.afterValue !== null ? currentPair.afterValue : '—'}</span>
+                        </div>
+                      </div>
+
+                      {/* First font */}
+                      <div className="absolute">
+                        <span
+                          style={{
+                            fontFamily: 'FirstFontPreview',
+                            fontSize: `${overlaySize}px`,
+                            color: 'rgba(0, 0, 255, 0.6)', // Semi-transparent blue
+                            textRendering: 'optimizeLegibility',
+                          }}
+                        >
+                          {currentPair.pair}
                         </span>
                       </div>
-                      <div className="flex gap-2">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          currentPair.status === 'match' ? 'bg-green-100 text-green-800' :
-                          currentPair.status === 'different' ? 'bg-amber-100 text-amber-800' :
-                          currentPair.status === 'only-before' ? 'bg-blue-100 text-blue-800' :
-                          'bg-purple-100 text-purple-800'
-                        }`}>
-                          {currentPair.status === 'match' ? 'Match' :
-                          currentPair.status === 'different' ? 'Different' :
-                          currentPair.status === 'only-before' ? `Only in ${fontFirst?.name || 'First Font'}` :
-                          `Only in ${fontSecond?.name || 'Second Font'}`}
+                      
+                      {/* Second font */}
+                      <div className="absolute">
+                        <span
+                          style={{
+                            fontFamily: 'SecondFontPreview',
+                            fontSize: `${overlaySize}px`,
+                            color: 'rgba(255, 0, 0, 0.6)', // Semi-transparent red
+                            textRendering: 'optimizeLegibility',
+                          }}
+                        >
+                          {currentPair.pair}
                         </span>
-                        {currentPair.status === 'different' && (
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            currentPair.difference > 0 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
-                          }`}>
-                            {currentPair.difference > 0 ? '+' : ''}{currentPair.difference}
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-between gap-4 mt-6">
+                      {/* Pair info header */}
+                      <div className="flex justify-between items-center gap-4 mb-4">
+                        <div>
+                          <span className="font-mono text-lg">{currentPair.left},{currentPair.right}</span>
+                          <span className="ml-4 text-gray-500">
+                            Pair {currentPairIndex + 1} of {filteredPairs.length}
                           </span>
-                        )}
+                        </div>
+                        <div className="flex gap-2">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            currentPair.status === 'match' ? 'bg-green-100 text-green-800' :
+                            currentPair.status === 'different' ? 'bg-amber-100 text-amber-800' :
+                            currentPair.status === 'only-before' ? 'bg-blue-100 text-blue-800' :
+                            'bg-purple-100 text-purple-800'
+                          }`}>
+                            {currentPair.status === 'match' ? 'Match' :
+                            currentPair.status === 'different' ? 'Different' :
+                            currentPair.status === 'only-before' ? `Only in ${fontFirst?.name || 'First Font'}` :
+                            `Only in ${fontSecond?.name || 'Second Font'}`}
+                          </span>
+                          {currentPair.status === 'different' && (
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              currentPair.difference > 0 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+                            }`}>
+                              {currentPair.difference > 0 ? '+' : ''}{currentPair.difference}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Navigation buttons */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => navigateToPair('prev')}
+                          className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md flex items-center"
+                        >
+                          ← Previous
+                        </button>
+                        <button
+                          onClick={() => navigateToPair('next')}
+                          className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md flex items-center"
+                        >
+                          Next →
+                        </button>
                       </div>
                     </div>
-                    
-                    {/* Navigation buttons */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => navigateToPair('prev')}
-                        className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md flex items-center"
-                      >
-                        ← Previous
-                      </button>
-                      <button
-                        onClick={() => navigateToPair('next')}
-                        className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md flex items-center"
-                      >
-                        Next →
-                      </button>
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        )}
+                  </>
+                );
+              })()}
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-500">No comparison results available. Please go to Settings tab and run a comparison first.</p>
+            </div>
+          )}
+        </div>
       </div>
       {/* Add proper font style tags */}
       <style dangerouslySetInnerHTML={{
